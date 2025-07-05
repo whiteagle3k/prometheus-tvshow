@@ -9,10 +9,12 @@ import time
 import random
 from pathlib import Path
 from typing import Any, Dict
+import re
 
 from core.entity import BaseEntity
 from core.affect import MoodEngine, MoodState
 from extensions.tvshow.lore_engine import lore
+from extensions.tvshow.reflector import reflector  # Assume a global singleton for now
 
 
 class TVShowEntity(BaseEntity):
@@ -41,6 +43,7 @@ class TVShowEntity(BaseEntity):
         
         # Initialize mood engine for emotional state
         self.mood_engine = MoodEngine()
+        self.user_profile = {}  # Store extracted user facts (e.g., name)
         
         print(f"🎭 {self.CHARACTER_NAME} initialized - TV Show character")
 
@@ -229,9 +232,36 @@ class TVShowEntity(BaseEntity):
         
         return tone_mapping.get(mood, "neutral")
 
-    async def generate_autonomous_message(self, scene_context: str = None, arc_context: str = None) -> str:
-        """Generate a context-rich autonomous message prompt for this character."""
-        # Gather context
+    def _extract_user_facts(self, user_message: str):
+        """Extract user facts (e.g., name) from the message and update user_profile."""
+        # Patterns for name extraction (like Aletheia)
+        patterns = [
+            r"my name is\s+(\w+)",
+            r"call me\s+(\w+)",
+            r"меня зовут\s+(\w+)",
+            r"мо[её] имя\s+(\w+)"
+        ]
+        for pat in patterns:
+            match = re.search(pat, user_message, re.IGNORECASE)
+            if match:
+                name = match.group(1)
+                self.user_profile["name"] = name
+                print(f"[DEBUG] Extracted user name: {name}")
+                break
+
+    async def build_contextual_prompt(self, user_message: str = None, scene_context: str = None, arc_context: str = None) -> str:
+        """Build a context-rich prompt for the LLM, including memory, mood, scenario, and lore."""
+        # Retrieve shared scene context from the Reflector
+        shared_scene_context = None
+        if hasattr(self, 'CHARACTER_ID') and self.CHARACTER_ID:
+            try:
+                shared_scene_context = reflector.get_scene_context_for_character(self.CHARACTER_ID)
+                print(f"[DEBUG] {self.CHARACTER_NAME} - Retrieved shared scene context: {shared_scene_context}")
+            except Exception as e:
+                print(f"[DEBUG] Could not get shared scene context: {e}")
+        else:
+            print(f"[DEBUG] {self.CHARACTER_NAME} - No CHARACTER_ID available")
+        
         memory_ref = self._memory_reference_phrase()
         scene_phrase = self._scene_aware_phrase(scene_context, arc_context)
         mood_phrase = self._mood_aware_phrase()
@@ -242,6 +272,8 @@ class TVShowEntity(BaseEntity):
         law = lore.get_law_of_emergence()
         # Build context block
         context_lines = []
+        if shared_scene_context:
+            context_lines.append(f"[Shared Scene Context] {shared_scene_context}")
         if scene_context:
             context_lines.append(f"[Scene context] {scene_context}")
         if arc_context:
@@ -254,6 +286,8 @@ class TVShowEntity(BaseEntity):
             context_lines.append(f"[Scene insight] {scene_phrase}")
         if mood_phrase:
             context_lines.append(f"[Mood expression] {mood_phrase}")
+        if self.user_profile.get("name"):
+            context_lines.append(f"[User name] {self.user_profile['name']}")
         # Lore
         if core_dream:
             context_lines.append(f"[Core Dream] {core_dream}")
@@ -261,6 +295,8 @@ class TVShowEntity(BaseEntity):
             context_lines.append(f"[Traits] {', '.join(traits)}")
         if law:
             context_lines.append(f"[World Law] {law}")
+        if user_message:
+            context_lines.append(f"[User message] {user_message}")
         context_block = "\n".join(context_lines)
         # Instruction for the LLM
         instruction = (
@@ -270,28 +306,44 @@ class TVShowEntity(BaseEntity):
             f"Be concise, avoid repetition, and keep the conversation flowing."
         )
         prompt = f"{context_block}\n\n{instruction}\nMessage:".strip()
+        print(f"[DEBUG] {self.CHARACTER_NAME} context-rich prompt:\n{prompt}\n{'='*40}")
         return prompt
+
+    async def think(self, user_text: str, user_id: str | None = None, scene_context: str = None, arc_context: str = None) -> dict[str, Any]:
+        """
+        Override think to use context-rich prompt and update memory after every message.
+        """
+        self._extract_user_facts(user_text)
+        prompt = await self.build_contextual_prompt(user_message=user_text, scene_context=scene_context, arc_context=arc_context)
+        # Call parent's think with the context-rich prompt
+        result = await super().think(prompt, user_id=user_id)
+        # Log user and AI messages to memory
+        self.log_message(speaker="user", msg_type="user", content=user_text)
+        ai_response = result.get("response", "")
+        self.log_message(speaker=self.CHARACTER_ID, msg_type="ai", content=ai_response)
+        return result
+
+    async def generate_autonomous_message(self, scene_context: str = None, arc_context: str = None) -> str:
+        """
+        Generate an autonomous message using the context-rich prompt and update memory.
+        """
+        prompt = await self.build_contextual_prompt(scene_context=scene_context, arc_context=arc_context)
+        # Call parent's think with the context-rich prompt
+        result = await super().think(prompt)
+        ai_response = result.get("response", "")
+        self.log_message(speaker=self.CHARACTER_ID, msg_type="ai", content=ai_response)
+        return ai_response
 
     async def process_query(self, query: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
         """
-        Process a query as this character.
-
-        Args:
-            query: User query or message
-            context: Additional context
-
-        Returns:
-            Character's response
+        Process a query as this character, using the context-rich prompt.
         """
         context = context or {}
-        
-        print(f"🎭 {self.CHARACTER_NAME} processing query...")
-        
-        # Use the base entity's think method
-        response = await self.think(query)
-        
+        scene_context = context.get("scene_context")
+        arc_context = context.get("arc_context")
+        response = await self.think(query, scene_context=scene_context, arc_context=arc_context)
         return {
-            "response": response,
+            "response": response.get("response", ""),
             "character": self.CHARACTER_ID,
             "query": query,
             "context": context

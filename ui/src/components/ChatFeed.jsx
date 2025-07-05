@@ -19,6 +19,7 @@ function ChatFeed() {
     e.preventDefault()
     if (!newMessage.trim()) return
     try {
+      setNewMessage('')
       await fetch('/api/tvshow/chat', {
         method: 'POST',
         headers: {
@@ -29,7 +30,6 @@ function ChatFeed() {
           content: newMessage
         })
       })
-      setNewMessage('')
     } catch (error) {
       // Optionally handle error
     }

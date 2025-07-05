@@ -26,7 +26,7 @@ class TestAgentManager:
     async def test_route_message_to_agent_exolink_success(self):
         """Test successful message routing via ExoLink."""
         with patch('extensions.tvshow.agent_manager.router') as mock_router:
-            mock_router.send.return_value = "Hello from ExoLink!"
+            mock_router.send = AsyncMock(return_value="Hello from ExoLink!")
             
             result = await self.agent_manager.route_message_to_agent(
                 "max", "Hello Max!", context={"test": "context"}

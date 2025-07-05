@@ -21,7 +21,7 @@ class AgentManager:
             # Use ExoLink router to send message to agent
             result = await router.send(
                 content=user_message,
-                source="api:user",
+                source=SourceType.API.value,
                 target=f"entity:{agent_id}",
                 exchange_type=ExchangeType.TEXT,
                 metadata={

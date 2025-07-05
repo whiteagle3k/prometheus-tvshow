@@ -12,6 +12,8 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 import asyncio
 from extensions.tvshow.lore_engine import lore
+from core.exolink import router
+from core.exolink.models import Exchange
 
 
 class SceneSummary:
@@ -66,6 +68,54 @@ class Reflector:
         self.last_summary_time = time.time()
         self.active_characters = set()
         self.recent_triggers = []
+        
+        # Subscribe to character messages via ExoLink
+        self._subscribe_to_character_messages()
+    
+    def _subscribe_to_character_messages(self):
+        """Subscribe to all character messages via ExoLink Pub/Sub."""
+        # Subscribe to all entity targets (character messages)
+        router.subscribe("entity:*", self._handle_character_message)
+        # Also subscribe to wildcard to catch all messages
+        router.subscribe("*", self._handle_character_message)
+        print("🎭 Reflector subscribed to character messages via ExoLink")
+    
+    def _handle_character_message(self, exchange: Exchange):
+        """Handle incoming character messages from ExoLink."""
+        try:
+            # Extract message details from the exchange
+            speaker = exchange.source.identifier
+            content = exchange.content
+            
+            # Determine if this is a character or user message
+            if speaker in ["max", "leo", "emma", "marvin"]:
+                print(f"[DEBUG] Reflector received character message from {speaker}: {content}")
+                msg_type = "ai"
+            elif speaker == "user" or "user" in speaker.lower():
+                print(f"[DEBUG] Reflector received user message: {content}")
+                msg_type = "user"
+            else:
+                # Skip other types of messages
+                return
+            
+            # Add to conversation log
+            self.add_message(
+                speaker=speaker,
+                content=str(content),
+                msg_type=msg_type
+            )
+            
+        except Exception as e:
+            print(f"[DEBUG] Reflector error handling character message: {e}")
+    
+    def add_user_message(self, content: str) -> None:
+        """Manually add a user message (for API calls)."""
+        print(f"[DEBUG] Reflector manually adding user message: {content}")
+        self.add_message(
+            speaker="user",
+            content=content,
+            msg_type="user"
+        )
     
     def add_message(self, 
                    speaker: str, 
@@ -81,6 +131,7 @@ class Reflector:
         }
         
         self.conversation_log.append(entry)
+        print(f"[DEBUG] Reflector - Added message to log. Total messages: {len(self.conversation_log)}")
         
         # Track active characters
         if speaker != "user":
@@ -96,21 +147,26 @@ class Reflector:
         if len(self.conversation_log) > self.max_log_size:
             self.conversation_log = self.conversation_log[-self.max_log_size:]
         
-        # Check if we should generate a new summary
-        if len(self.conversation_log) % self.summary_interval == 0:
-            self._generate_summary()
+        # Always generate a new summary after every message
+        print(f"[DEBUG] Reflector - Generating summary after message {len(self.conversation_log)}")
+        self._generate_summary()
     
     def _generate_summary(self) -> None:
         """Generate a new scene summary based on recent conversation."""
+        print(f"[DEBUG] Reflector - _generate_summary called with {len(self.conversation_log)} messages")
+        
         if not self.conversation_log:
+            print("[DEBUG] Reflector - No conversation log, skipping summary")
             return
         
         # Get recent messages for summarization
         recent_messages = self.conversation_log[-self.summary_interval:]
+        print(f"[DEBUG] Reflector - Processing {len(recent_messages)} recent messages for summary")
         
         # Simple heuristic-based summarization for now
         # (Can be replaced with LLM-based summarization later)
         summary = self._heuristic_summarize(recent_messages)
+        print(f"[DEBUG] Reflector - Generated summary: {summary}")
         
         # Create scene summary
         scene_summary = SceneSummary(
@@ -124,6 +180,7 @@ class Reflector:
         )
         
         self.scene_summaries.append(scene_summary)
+        print(f"[DEBUG] Reflector - Added scene summary. Total summaries: {len(self.scene_summaries)}")
         
         # Keep only last 10 summaries
         if len(self.scene_summaries) > 10:
@@ -142,7 +199,12 @@ class Reflector:
             }
         
         # Extract content and speakers
-        contents = [msg["content"] for msg in messages]
+        def _extract_content(msg):
+            c = msg['content'] if isinstance(msg, dict) and 'content' in msg else str(msg)
+            if isinstance(c, dict) and 'response' in c:
+                return str(c['response'])
+            return str(c)
+        contents = [_extract_content(m) for m in messages]
         speakers = [msg["speaker"] for msg in messages]
         
         # Simple theme detection
@@ -234,10 +296,16 @@ class Reflector:
     
     def get_scene_context_for_character(self, character_id: str) -> str:
         """Get scene context formatted for a specific character."""
+        print(f"[DEBUG] Reflector - Conversation log size: {len(self.conversation_log)}")
+        print(f"[DEBUG] Reflector - Scene summaries count: {len(self.scene_summaries)}")
+        
         current_summary = self.get_current_scene_summary()
         
         if not current_summary:
+            print(f"[DEBUG] Reflector - No current scene summary available")
             return "The scene is quiet with no recent activity."
+        
+        print(f"[DEBUG] Reflector - Current summary: {current_summary.summary}")
         
         context = f"Current scene: {current_summary.summary}\n"
         context += f"Discussion theme: {current_summary.discussion_theme}\n"
@@ -247,17 +315,6 @@ class Reflector:
         if current_summary.recent_triggers:
             context += f"\nRecent events: {', '.join(current_summary.recent_triggers)}"
         
-        # Add lore context
-        world_name = lore.get_world_name()
-        law = lore.get_law_of_emergence()
-        dream = lore.get_core_dream(character_id)
-        traits = lore.get_traits(character_id)
-        context['lore'] = {
-            'world_name': world_name,
-            'law_of_emergence': law,
-            'core_dream': dream,
-            'traits': traits
-        }
         return context
     
     def get_scene_tone_for_mood_propagation(self) -> tuple[str, float]:
@@ -288,3 +345,6 @@ class Reflector:
             "current_tone": current_summary.emotional_tone if current_summary else "neutral",
             "current_tone_score": current_summary.scene_tone_score if current_summary else 0.0
         } 
+
+# Global singleton instance for shared context
+reflector = Reflector() 
