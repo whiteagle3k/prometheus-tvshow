@@ -62,8 +62,23 @@ class TVShowRouter:
                 print(f"❌ Failed to auto-initialize {character_id}: {str(e)}")
         
         print(f"🎭 Auto-initialization complete. {len(self.characters)} characters ready.")
-    
+
+        # Register ExoLink targets for each character (must be after self.characters is populated)
+        from core.exolink.router import router
+        from core.exolink.models import TargetType
+        def make_character_handler(character):
+            async def handler(exchange):
+                import asyncio
+                if asyncio.iscoroutinefunction(character.think):
+                    return await character.think(exchange.content)
+                else:
+                    return character.think(exchange.content)
+            return handler
+        for character_id, character in self.characters.items():
+            router.register_target(TargetType.ENTITY, character_id, make_character_handler(character))
+
     async def _broadcast_event(self, event: dict):
+        print(f"[DEBUG] Broadcasting event: {event}")
         """Broadcast an event to all connected WebSocket clients."""
         to_remove = set()
         for ws in self.ws_clients:
@@ -241,6 +256,7 @@ class TVShowRouter:
         
         @self.app.post("/tvshow/chat")
         async def send_message(message: Dict[str, Any]):
+            print(f"[DEBUG] /tvshow/chat handler called with: {message}")
             """Send a message to the chat and get AI response."""
             character_id = message.get("character_id")
             content = message.get("content")
@@ -261,6 +277,7 @@ class TVShowRouter:
                     "phase_id": phase_id
                 }
                 self.chat_history.append(scene_chat_entry)
+                print(f"[DEBUG] Appending and broadcasting scene message: {scene_chat_entry}")
                 asyncio.create_task(self._broadcast_event({"type": "chat", "payload": {"message": scene_chat_entry}}))
                 self.reflector.add_message("scene", content, "scene")
                 # Still check for arc/scenario triggers
@@ -290,6 +307,7 @@ class TVShowRouter:
                 "phase_id": phase_id
             }
             self.chat_history.append(user_chat_entry)
+            print(f"[DEBUG] Appending and broadcasting user message: {user_chat_entry}")
             asyncio.create_task(self._broadcast_event({"type": "chat", "payload": {"message": user_chat_entry}}))
             self.characters[character_id].log_message("user", "user", content)
             self.reflector.add_message("user", content, "user")
@@ -311,6 +329,7 @@ class TVShowRouter:
                 "phase_id": phase_id
             }
             self.chat_history.append(ai_chat_entry)
+            print(f"[DEBUG] Appending and broadcasting AI message: {ai_chat_entry}")
             asyncio.create_task(self._broadcast_event({"type": "chat", "payload": {"message": ai_chat_entry}}))
             self.characters[character_id].log_message(character_id, "ai", ai_response)
             self.reflector.add_message(character_id, ai_response, "ai")
@@ -545,24 +564,20 @@ class TVShowRouter:
                 self.ws_clients.discard(ws)
 
     def _register_characters(self):
-        """Register TV show characters with the Prometheus registry."""
-        print("🎭 Registering TV show characters with Prometheus registry...")
-        
-        # Register each character
-        characters = get_all_characters()
-        for character_id, entity_class in characters.items():
-            # Get character info for registration
-            temp_instance = entity_class()
-            identity = temp_instance.identity_config
-            
-            register_entity_class(
-                entity_id=character_id,
-                entity_class=entity_class,
-                entity_name=identity.get("name", character_id),
-                description=identity.get("description", f"TV Show character: {character_id}")
-            )
-            
-            print(f"✅ Registered character: {character_id} ({identity.get('name', character_id)})")
+        """Register TV show characters with Prometheus registry and ExoLink."""
+        from core.exolink.router import router
+        from core.exolink.models import TargetType
+        def make_character_handler(character):
+            async def handler(exchange):
+                # ExoLink expects a sync handler, so wrap in ensure_future if needed
+                import asyncio
+                if asyncio.iscoroutinefunction(character.think):
+                    return await character.think(exchange.content)
+                else:
+                    return character.think(exchange.content)
+            return handler
+        for character_id, character in get_all_characters().items():
+            register_entity_class(character_id, character)
     
     def get_app(self) -> FastAPI:
         """Get the FastAPI app instance."""

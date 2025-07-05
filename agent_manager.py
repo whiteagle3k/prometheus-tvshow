@@ -19,9 +19,9 @@ class AgentManager:
         start_time = time.time()
         try:
             # Use ExoLink router to send message to agent
-            result = router.send(
+            result = await router.send(
                 content=user_message,
-                source="tvshow:user",
+                source="api:user",
                 target=f"entity:{agent_id}",
                 exchange_type=ExchangeType.TEXT,
                 metadata={
