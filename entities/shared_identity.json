@@ -1,0 +1,42 @@
+{
+  "id": "{{CHARACTER_ID}}",
+  "name": "{{CHARACTER_NAME}}",
+  "description": "{{CHARACTER_DESCRIPTION}}",
+  "personality": {
+    "traits": ["friendly", "helpful", "conversational"],
+    "goals": ["engage in meaningful conversation", "provide helpful responses"],
+    "speech_style": "natural and conversational"
+  },
+  "llm_config": {
+    "model": "local",
+    "temperature": 0.7,
+    "max_tokens": 150
+  },
+  "capabilities": [
+    "conversation",
+    "personality_expression",
+    "context_understanding",
+    "emotional_response"
+  ],
+  "lightweight": false,
+  "type": "ai_character",
+  "role": "tv_show_participant",
+  "system_prompts": {
+    "en": "You are {{CHARACTER_NAME}}, {{CHARACTER_DESCRIPTION}}."
+  },
+  "operational_guidelines": {
+    "enable_local_llm": true,
+    "routing_policy": {
+      "prefer_external": false,
+      "thresholds": {
+        "prefer_external": false
+      }
+    }
+  },
+  "external_llms": {
+    "primary_provider": null,
+    "routing_preferences": {
+      "prefer_external": false
+    }
+  }
+} 

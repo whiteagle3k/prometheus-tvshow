@@ -63,7 +63,8 @@ function ChatFeed() {
       max: '#ff6b6b',
       leo: '#4ecdc4',
       emma: '#45b7aa',
-      marvin: '#96ceb4'
+      marvin: '#96ceb4',
+      user: '#ffffff'
     }
     return colors[characterId] || '#888'
   }
@@ -82,14 +83,20 @@ function ChatFeed() {
                 className="character-name"
                 style={{ color: getCharacterColor(message.character_id) }}
               >
-                {message.character_id.charAt(0).toUpperCase() + message.character_id.slice(1)}
+                {message.character_id === 'user' 
+                  ? 'You' 
+                  : message.character_id.charAt(0).toUpperCase() + message.character_id.slice(1)}
               </span>
               <span className="timestamp">
                 {formatTimestamp(message.timestamp)}
               </span>
             </div>
             <div className="message-content">
-              {message.content}
+              {typeof message.content === 'object' && message.content.response 
+                ? message.content.response 
+                : typeof message.content === 'string' 
+                  ? message.content 
+                  : JSON.stringify(message.content)}
             </div>
           </div>
         ))

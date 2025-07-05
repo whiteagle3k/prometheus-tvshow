@@ -17,6 +17,10 @@ import os
 from .entities import get_character, get_all_characters
 from .scenarios import ScenarioManager, create_sample_scenarios
 
+# Import Prometheus registry system
+from core.runtime.registry import register_entity_class, get_agent
+from core.runtime.lifecycle import startup_system
+
 
 class TVShowRouter:
     """Router for TV show extension API endpoints."""
@@ -26,6 +30,9 @@ class TVShowRouter:
         self.characters: Dict[str, Any] = {}
         self.scenario_manager = ScenarioManager()
         self.chat_history: List[Dict[str, Any]] = []
+        
+        # Register TV show characters with Prometheus registry
+        self._register_characters()
         
         # Initialize sample scenarios
         for scenario in create_sample_scenarios():
@@ -69,18 +76,16 @@ class TVShowRouter:
         
         @self.app.post("/tvshow/characters/{character_id}/init")
         async def init_character(character_id: str):
-            """Initialize a character."""
-            entity_class = get_character(character_id)
-            if not entity_class:
-                raise HTTPException(status_code=404, detail=f"Character {character_id} not found")
-            
+            """Initialize a character using Prometheus registry."""
             try:
-                character = entity_class()
+                # Use Prometheus registry to get/initialize the character
+                character = await get_agent(character_id)
                 self.characters[character_id] = character
+                
                 return {
                     "status": "success",
                     "character_id": character_id,
-                    "message": f"Character {character_id} initialized"
+                    "message": f"Character {character_id} initialized via Prometheus registry"
                 }
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f"Failed to initialize character: {str(e)}")
@@ -100,7 +105,7 @@ class TVShowRouter:
         
         @self.app.post("/tvshow/chat")
         async def send_message(message: Dict[str, Any]):
-            """Send a message to the chat."""
+            """Send a message to the chat and get AI response."""
             character_id = message.get("character_id")
             content = message.get("content")
             
@@ -110,23 +115,58 @@ class TVShowRouter:
             if character_id not in self.characters:
                 raise HTTPException(status_code=404, detail=f"Character {character_id} not initialized")
             
-            # Add message to chat history
-            chat_entry = {
-                "character_id": character_id,
+            # Add user message to chat history
+            user_chat_entry = {
+                "character_id": "user",
                 "content": content,
                 "timestamp": asyncio.get_event_loop().time()
             }
-            self.chat_history.append(chat_entry)
+            self.chat_history.append(user_chat_entry)
             
-            # Check for scenario triggers
-            triggered_scenarios = self.scenario_manager.check_triggers(content, character_id)
-            
-            return {
-                "status": "success",
-                "message": "Message sent",
-                "chat_entry": chat_entry,
-                "triggered_scenarios": [s.scenario_id for s in triggered_scenarios]
-            }
+            # Get AI response from the character
+            character = self.characters[character_id]
+            try:
+                # Call the character's think method directly instead of process_query
+                response_data = await character.think(content)
+                ai_response = response_data.get("response", "I'm not sure how to respond to that.")
+                if isinstance(ai_response, dict) and "content" in ai_response:
+                    ai_response = ai_response["content"]
+                
+                # Add AI response to chat history
+                ai_chat_entry = {
+                    "character_id": character_id,
+                    "content": ai_response,
+                    "timestamp": asyncio.get_event_loop().time()
+                }
+                self.chat_history.append(ai_chat_entry)
+                
+                # Check for scenario triggers
+                triggered_scenarios = self.scenario_manager.check_triggers(content, character_id)
+                
+                return {
+                    "status": "success",
+                    "message": "Message sent and AI responded",
+                    "user_message": user_chat_entry,
+                    "ai_response": ai_chat_entry,
+                    "triggered_scenarios": [s.scenario_id for s in triggered_scenarios]
+                }
+                
+            except Exception as e:
+                # Add error response to chat history
+                error_chat_entry = {
+                    "character_id": character_id,
+                    "content": f"Sorry, I'm having trouble responding right now. Error: {str(e)}",
+                    "timestamp": asyncio.get_event_loop().time()
+                }
+                self.chat_history.append(error_chat_entry)
+                
+                return {
+                    "status": "error",
+                    "message": f"Failed to get AI response: {str(e)}",
+                    "user_message": user_chat_entry,
+                    "ai_response": error_chat_entry,
+                    "triggered_scenarios": []
+                }
         
         @self.app.get("/tvshow/chat/history")
         async def get_chat_history(limit: int = 50):
@@ -195,6 +235,26 @@ class TVShowRouter:
                 "total_messages": len(self.chat_history),
                 "scenarios_executed": len(self.scenario_manager.get_scenario_history())
             }
+    
+    def _register_characters(self):
+        """Register TV show characters with the Prometheus registry."""
+        print("🎭 Registering TV show characters with Prometheus registry...")
+        
+        # Register each character
+        characters = get_all_characters()
+        for character_id, entity_class in characters.items():
+            # Get character info for registration
+            temp_instance = entity_class()
+            identity = temp_instance.identity_config
+            
+            register_entity_class(
+                entity_id=character_id,
+                entity_class=entity_class,
+                entity_name=identity.get("name", character_id),
+                description=identity.get("description", f"TV Show character: {character_id}")
+            )
+            
+            print(f"✅ Registered character: {character_id} ({identity.get('name', character_id)})")
     
     def get_app(self) -> FastAPI:
         """Get the FastAPI app instance."""
