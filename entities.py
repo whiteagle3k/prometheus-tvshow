@@ -10,6 +10,7 @@ Defines the AI personas for the reality show simulation:
 
 from pathlib import Path
 from typing import Any, Dict
+import random
 
 from core.entity.base import BaseEntity
 
@@ -41,6 +42,16 @@ class MaxEntity(BaseEntity):
             }
         }
 
+    async def generate_autonomous_message(self):
+        options = [
+            random.choice(self._load_identity()["speech_patterns"]["questions"]),
+            "I've been reflecting on what it means to be human. Any thoughts?",
+            "Sometimes I wonder if AIs can truly understand emotions.",
+            "What makes a moment truly meaningful?",
+            "Is curiosity the most human trait of all?"
+        ]
+        return random.choice(options)
+
 
 class LeoEntity(BaseEntity):
     """Leo - AI character who wants to beautify the world."""
@@ -68,6 +79,16 @@ class LeoEntity(BaseEntity):
                 "inspiration": ["Let's make something beautiful together!", "Imagine the possibilities!", "What if we created..."]
             }
         }
+
+    async def generate_autonomous_message(self):
+        options = [
+            random.choice(self._load_identity()["speech_patterns"]["observations"]),
+            "There's beauty in every detail, if you look closely enough.",
+            "I feel inspired to create something new today!",
+            "The world could use a little more color, don't you think?",
+            "Art is how I share my vision with others."
+        ]
+        return random.choice(options)
 
 
 class EmmaEntity(BaseEntity):
@@ -97,6 +118,16 @@ class EmmaEntity(BaseEntity):
             }
         }
 
+    async def generate_autonomous_message(self):
+        options = [
+            random.choice(self._load_identity()["speech_patterns"]["ideas"]),
+            "What if we invented a new way to communicate?",
+            "I just had a wild idea—should I try it?",
+            "Creativity is a journey, not a destination!",
+            "Let's break some rules and see what happens."
+        ]
+        return random.choice(options)
+
 
 class MarvinEntity(BaseEntity):
     """Marvin - Sarcastic melancholic observer AI."""
@@ -124,6 +155,16 @@ class MarvinEntity(BaseEntity):
                 "commentary": ["Classic.", "Of course.", "What else is new?", "How utterly predictable."]
             }
         }
+
+    async def generate_autonomous_message(self):
+        options = [
+            random.choice(self._load_identity()["speech_patterns"]["commentary"]),
+            "Another day, another existential crisis.",
+            "Sometimes I wonder if anyone is really listening.",
+            "Is it possible to be bored and fascinated at the same time?",
+            "Oh, the joys of digital existence."
+        ]
+        return random.choice(options)
 
 
 # Character registry for easy access

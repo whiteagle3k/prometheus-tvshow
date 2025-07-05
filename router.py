@@ -13,6 +13,7 @@ from typing import Dict, List, Any, Optional
 import asyncio
 import json
 import os
+import random
 
 from .entities import get_character, get_all_characters
 from .scenarios import ScenarioManager, create_sample_scenarios
@@ -30,6 +31,7 @@ class TVShowRouter:
         self.characters: Dict[str, Any] = {}
         self.scenario_manager = ScenarioManager()
         self.chat_history: List[Dict[str, Any]] = []
+        self._autonomy_task = None
         
         # Register TV show characters with Prometheus registry
         self._register_characters()
@@ -55,13 +57,52 @@ class TVShowRouter:
         
         print(f"🎭 Auto-initialization complete. {len(self.characters)} characters ready.")
     
+    async def _autonomous_character_loop(self):
+        """Background loop for autonomous character behavior."""
+        await asyncio.sleep(5)  # Wait a bit for system to finish startup
+        while True:
+            if not self.characters:
+                await asyncio.sleep(5)
+                continue
+            for character_id, character in self.characters.items():
+                # Random delay between 10-40 seconds
+                delay = random.randint(10, 40)
+                await asyncio.sleep(delay)
+                try:
+                    # Get an autonomous prompt for the character
+                    if hasattr(character, 'generate_autonomous_message'):
+                        prompt = await character.generate_autonomous_message()
+                    else:
+                        prompt = f"({character_id} is thinking...)"
+                    # Use the LLM to generate the actual message
+                    response_data = await character.think(prompt)
+                    ai_response = response_data.get("response", prompt)
+                    if isinstance(ai_response, dict) and "content" in ai_response:
+                        ai_response = ai_response["content"]
+                    # Remove prompt echoes from the response
+                    cleaned = ai_response.replace(prompt, "").strip()
+                    # Also remove repeated prompt echoes (e.g., Marvin's case)
+                    cleaned = cleaned.replace(f"({character_id} is thinking...)", "").strip()
+                    ai_chat_entry = {
+                        "character_id": character_id,
+                        "content": cleaned,
+                        "timestamp": asyncio.get_event_loop().time()
+                    }
+                    self.chat_history.append(ai_chat_entry)
+                    print(f"[Autonomy] {character_id}: {cleaned}")
+                except Exception as e:
+                    print(f"[Autonomy] Error for {character_id}: {e}")
+
     def _setup_routes(self):
         """Setup API routes."""
         
-        # Add startup event to auto-initialize characters
+        # Add startup event to auto-initialize characters and start autonomy loop
         @self.app.on_event("startup")
         async def startup_event():
             await self._auto_initialize_characters()
+            # Start background autonomy loop
+            if not self._autonomy_task:
+                self._autonomy_task = asyncio.create_task(self._autonomous_character_loop())
         
         # Serve UI static files
         ui_path = os.path.join(os.path.dirname(__file__), "ui", "dist")

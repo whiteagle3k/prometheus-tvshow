@@ -5,11 +5,18 @@ function ChatFeed() {
   const [newMessage, setNewMessage] = useState('')
   const [selectedCharacter, setSelectedCharacter] = useState('max')
   const [loading, setLoading] = useState(false)
+  const [initialLoading, setInitialLoading] = useState(true)
   const chatEndRef = useRef(null)
 
   // Fetch chat history on component mount
   useEffect(() => {
-    fetchChatHistory()
+    fetchChatHistory(true)
+  }, [])
+
+  // Auto-refresh chat history every 1 second
+  useEffect(() => {
+    const interval = setInterval(() => fetchChatHistory(false), 1000)
+    return () => clearInterval(interval)
   }, [])
 
   // Auto-scroll to bottom on new messages
@@ -19,9 +26,9 @@ function ChatFeed() {
     }
   }, [messages])
 
-  const fetchChatHistory = async () => {
+  const fetchChatHistory = async (showSpinner = false) => {
     try {
-      setLoading(true)
+      if (showSpinner) setLoading(true)
       const response = await fetch('/api/tvshow/chat/history?limit=50')
       if (response.ok) {
         const data = await response.json()
@@ -30,7 +37,8 @@ function ChatFeed() {
     } catch (error) {
       console.error('Failed to fetch chat history:', error)
     } finally {
-      setLoading(false)
+      if (showSpinner) setLoading(false)
+      if (initialLoading) setInitialLoading(false)
     }
   }
 
@@ -89,7 +97,7 @@ function ChatFeed() {
   return (
     <div className="chat-feed" style={{display: 'flex', flexDirection: 'column', flex: 1, height: '100%'}}>
       <div style={{flex: 1, overflowY: 'auto', marginBottom: 15}}>
-        {loading ? (
+        {initialLoading ? (
           <div className="loading">Loading chat history...</div>
         ) : messages.length === 0 ? (
           <div className="loading">No messages yet. Start the conversation!</div>
