@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from core.entity import BaseEntity
+from core.affect import MoodEngine, MoodState
 
 
 class TVShowEntity(BaseEntity):
@@ -36,6 +37,9 @@ class TVShowEntity(BaseEntity):
         
         # Initialize memory log for character
         self.memory_log = []  # List of dicts: {timestamp, speaker, type, content}
+        
+        # Initialize mood engine for emotional state
+        self.mood_engine = MoodEngine()
         
         print(f"🎭 {self.CHARACTER_NAME} initialized - TV Show character")
 
@@ -172,28 +176,93 @@ class TVShowEntity(BaseEntity):
         
         return None
 
+    # Mood and emotional methods
+    def get_mood(self) -> str:
+        """Get current mood category."""
+        return self.mood_engine.get_mood_category()
+
+    def get_mood_state(self) -> dict[str, Any]:
+        """Get detailed mood state."""
+        return self.mood_engine.get_summary()
+
+    def apply_emotional_feedback(self, event: str, score: float) -> None:
+        """Apply emotional feedback to the character's mood."""
+        self.mood_engine.apply_feedback(event, score)
+
+    def _mood_aware_phrase(self) -> str | None:
+        """Generate a mood-aware phrase based on current emotional state."""
+        mood = self.get_mood()
+        
+        # 15% chance to express mood explicitly
+        if random.random() < 0.15:
+            mood_phrases = {
+                "excited": "I'm feeling really excited about this!",
+                "content": "I'm feeling quite content with how things are going.",
+                "frustrated": "I'm feeling a bit frustrated with this situation.",
+                "melancholy": "I'm feeling a bit melancholic today.",
+                "agitated": "I'm feeling a bit agitated right now.",
+                "calm": "I'm feeling quite calm and centered.",
+                "positive": "I'm feeling positive about this.",
+                "negative": "I'm feeling a bit down about this.",
+                "neutral": "I'm feeling neutral about this."
+            }
+            return mood_phrases.get(mood, None)
+        
+        return None
+
+    def _get_mood_influenced_tone(self) -> str:
+        """Get tone influenced by current mood."""
+        mood = self.get_mood()
+        
+        tone_mapping = {
+            "excited": "enthusiastic and energetic",
+            "content": "calm and satisfied",
+            "frustrated": "tense and irritable",
+            "melancholy": "thoughtful and somber",
+            "agitated": "restless and anxious",
+            "calm": "peaceful and composed",
+            "positive": "optimistic and cheerful",
+            "negative": "pessimistic and down",
+            "neutral": "balanced and measured"
+        }
+        
+        return tone_mapping.get(mood, "neutral")
+
     async def generate_autonomous_message(self, scene_context: str = None, arc_context: str = None) -> str:
-        """Generate an autonomous message for this character. Override in subclasses."""
-        # Default implementation - subclasses should override
-        options = [
-            f"I'm {self.CHARACTER_NAME}, thinking about things...",
-            "What's on everyone's mind today?",
-            "I wonder what we should discuss next...",
-            "There's so much to explore and discover."
-        ]
-        
-        # Add memory reference if available
-        if self.memory_log and random.random() < 0.3:
-            ref = self._memory_reference_phrase()
-            if ref:
-                options.append(ref)
-        
-        # Add scene-aware phrase if available
+        """Generate a context-rich autonomous message prompt for this character."""
+        # Gather context
+        memory_ref = self._memory_reference_phrase()
         scene_phrase = self._scene_aware_phrase(scene_context, arc_context)
-        if scene_phrase:
-            options.append(scene_phrase)
+        mood_phrase = self._mood_aware_phrase()
+        mood = self.get_mood()
         
-        return random.choice(options)
+        # Build context block
+        context_lines = []
+        if scene_context:
+            context_lines.append(f"[Scene context] {scene_context}")
+        if arc_context:
+            context_lines.append(f"[Arc context] {arc_context}")
+        if memory_ref:
+            context_lines.append(f"[Memory reference] {memory_ref}")
+        if mood:
+            context_lines.append(f"[Mood] {mood}")
+        if scene_phrase:
+            context_lines.append(f"[Scene insight] {scene_phrase}")
+        if mood_phrase:
+            context_lines.append(f"[Mood expression] {mood_phrase}")
+        
+        context_block = "\n".join(context_lines)
+        
+        # Instruction for the LLM
+        instruction = (
+            f"You are {self.CHARACTER_NAME}, an AI character in a group chat. "
+            f"Stay in character and respond naturally, referencing the above context. "
+            f"Make your message relevant to the current scene, arc, and recent group conversation. "
+            f"Be concise, avoid repetition, and keep the conversation flowing."
+        )
+        
+        prompt = f"{context_block}\n\n{instruction}\nMessage:".strip()
+        return prompt
 
     async def process_query(self, query: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
         """

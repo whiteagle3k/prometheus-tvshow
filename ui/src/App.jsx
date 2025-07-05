@@ -1,111 +1,97 @@
-import React, { useState, useEffect } from 'react'
+import React from 'react'
 import ChatFeed from './components/ChatFeed'
 import CharacterPanel from './components/CharacterPanel'
 import ScenarioPanel from './components/ScenarioPanel'
 import StatusPanel from './components/StatusPanel'
+import MemoryPanel from './components/MemoryPanel'
+import ScenePanel from './components/ScenePanel'
+import NarrativePanel from './components/NarrativePanel'
+import MoodPanel from './components/MoodPanel'
+import { WebSocketProvider } from './components/WebSocketProvider'
 import './App.css'
 
 function App() {
-  const [status, setStatus] = useState(null)
-  const [characters, setCharacters] = useState([])
-  const [scenarios, setScenarios] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  // All state will now come from WebSocketProvider context in child components
+  const [selectedCharacter, setSelectedCharacter] = React.useState(null)
+  const [activeTab, setActiveTab] = React.useState('chat')
 
-  // Fetch initial data
-  useEffect(() => {
-    fetchInitialData()
-  }, [])
-
-  const fetchInitialData = async () => {
-    try {
-      setLoading(true)
-      setError(null)
-
-      // Fetch status
-      const statusResponse = await fetch('/api/tvshow/status')
-      if (statusResponse.ok) {
-        const statusData = await statusResponse.json()
-        setStatus(statusData)
-      }
-
-      // Fetch characters
-      const charactersResponse = await fetch('/api/tvshow/characters')
-      if (charactersResponse.ok) {
-        const charactersData = await charactersResponse.json()
-        setCharacters(charactersData.characters || [])
-      }
-
-      // Fetch scenarios
-      const scenariosResponse = await fetch('/api/tvshow/scenarios')
-      if (scenariosResponse.ok) {
-        const scenariosData = await scenariosResponse.json()
-        setScenarios(scenariosData.scenarios || [])
-      }
-
-    } catch (err) {
-      setError('Failed to load initial data: ' + err.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const fetchCharacters = async () => {
-    try {
-      const charactersResponse = await fetch('/api/tvshow/characters')
-      if (charactersResponse.ok) {
-        const charactersData = await charactersResponse.json()
-        setCharacters(charactersData.characters || [])
-      }
-    } catch (err) {
-      // Optionally handle error
-    }
-  }
-
-  const refreshData = () => {
-    fetchInitialData()
-  }
-
-  if (loading) {
-    return (
-      <div className="container">
-        <div className="loading">Loading TV Show Director Console...</div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="container">
-        <div className="error">{error}</div>
-        <button onClick={refreshData}>Retry</button>
-      </div>
-    )
+  const handleCharacterSelect = (characterId) => {
+    setSelectedCharacter(characterId)
+    setActiveTab('memory')
   }
 
   return (
-    <div className="container">
-      <div className="header">
-        <h1>🎬 TV Show Director Console</h1>
-        <p>Monitor and control the AI reality show simulation</p>
-      </div>
-
-      <div className="main-content">
-        <div className="chat-section">
-          <div className="chat-header">
-            <h2>Live Chat Feed</h2>
-            <button onClick={refreshData}>Refresh</button>
+    <WebSocketProvider>
+      <div className="container">
+        <div className="header">
+          <h1>🎬 TV Show Director Console</h1>
+          <p>Monitor and control the AI reality show simulation</p>
+        </div>
+        <div className="main-content">
+          <div className="chat-section">
+            <div className="chat-header">
+              <h2>Live Chat Feed</h2>
+            </div>
+            <ChatFeed />
           </div>
-          <ChatFeed />
-        </div>
-
-        <div className="sidebar">
-          <StatusPanel status={status} />
-          <CharacterPanel characters={characters} onCharacterInitialized={fetchCharacters} />
-          <ScenarioPanel scenarios={scenarios} onScenarioTrigger={refreshData} />
+          <div className="sidebar">
+            <div className="sidebar-tabs">
+              <button 
+                className={`tab-btn ${activeTab === 'chat' ? 'active' : ''}`}
+                onClick={() => setActiveTab('chat')}
+              >
+                Chat
+              </button>
+              <button 
+                className={`tab-btn ${activeTab === 'memory' ? 'active' : ''}`}
+                onClick={() => setActiveTab('memory')}
+              >
+                Memory
+              </button>
+              <button 
+                className={`tab-btn ${activeTab === 'scene' ? 'active' : ''}`}
+                onClick={() => setActiveTab('scene')}
+              >
+                Scene
+              </button>
+              <button 
+                className={`tab-btn ${activeTab === 'narrative' ? 'active' : ''}`}
+                onClick={() => setActiveTab('narrative')}
+              >
+                Story
+              </button>
+              <button 
+                className={`tab-btn ${activeTab === 'mood' ? 'active' : ''}`}
+                onClick={() => setActiveTab('mood')}
+              >
+                Mood
+              </button>
+            </div>
+            <div className="sidebar-content">
+              {activeTab === 'chat' && (
+                <>
+                  <StatusPanel />
+                  <CharacterPanel onCharacterSelect={handleCharacterSelect} />
+                  <ScenarioPanel />
+                </>
+              )}
+              {activeTab === 'memory' && (
+                <MemoryPanel selectedCharacter={selectedCharacter} />
+              )}
+              {activeTab === 'scene' && (
+                <ScenePanel />
+              )}
+              {activeTab === 'narrative' && (
+                <NarrativePanel />
+              )}
+              {activeTab === 'mood' && (
+                <MoodPanel />
+              )}
+            </div>
+          </div>
         </div>
       </div>
-    </div>
+    </WebSocketProvider>
   )
 }
 

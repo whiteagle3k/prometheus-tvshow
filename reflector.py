@@ -3,6 +3,7 @@ TV Show Reflector
 
 Maintains shared scene context and conversation memory for coordinated AI behavior.
 Provides scene summaries and context to all characters for scene-aware interactions.
+Enhanced with emotional tone analysis and mood propagation.
 """
 
 import time
@@ -20,12 +21,14 @@ class SceneSummary:
                  discussion_theme: str,
                  active_characters: List[str],
                  emotional_tone: str,
+                 scene_tone_score: float,
                  recent_triggers: List[str],
                  timestamp: float):
         self.summary = summary
         self.discussion_theme = discussion_theme
         self.active_characters = active_characters
         self.emotional_tone = emotional_tone
+        self.scene_tone_score = scene_tone_score  # [-1.0, 1.0] for mood propagation
         self.recent_triggers = recent_triggers
         self.timestamp = timestamp
     
@@ -36,6 +39,7 @@ class SceneSummary:
             "discussion_theme": self.discussion_theme,
             "active_characters": self.active_characters,
             "emotional_tone": self.emotional_tone,
+            "scene_tone_score": self.scene_tone_score,
             "recent_triggers": self.recent_triggers,
             "timestamp": self.timestamp,
             "formatted_time": datetime.fromtimestamp(self.timestamp).isoformat()
@@ -48,6 +52,7 @@ class Reflector:
     
     Maintains conversation log and provides periodic summaries
     to enable coordinated, scene-aware behavior.
+    Enhanced with emotional tone analysis and mood propagation.
     """
     
     def __init__(self, 
@@ -112,6 +117,7 @@ class Reflector:
             discussion_theme=summary["theme"],
             active_characters=list(self.active_characters),
             emotional_tone=summary["tone"],
+            scene_tone_score=summary["tone_score"],
             recent_triggers=self.recent_triggers.copy(),
             timestamp=time.time()
         )
@@ -122,7 +128,7 @@ class Reflector:
         if len(self.scene_summaries) > 10:
             self.scene_summaries = self.scene_summaries[-10:]
         
-        print(f"🎭 Scene summary generated: {summary['summary'][:100]}...")
+        print(f"🎭 Scene summary generated: {summary['summary'][:100]}... (tone: {summary['tone']}, score: {summary['tone_score']:.2f})")
     
     def _heuristic_summarize(self, messages: List[Dict[str, Any]]) -> Dict[str, str]:
         """Generate a heuristic-based summary of recent messages."""
@@ -130,7 +136,8 @@ class Reflector:
             return {
                 "summary": "No recent activity",
                 "theme": "quiet",
-                "tone": "neutral"
+                "tone": "neutral",
+                "tone_score": 0.0
             }
         
         # Extract content and speakers
@@ -150,19 +157,48 @@ class Reflector:
         
         theme = themes[0] if themes else "general discussion"
         
-        # Simple tone detection
+        # Enhanced tone detection with score calculation
         tone_indicators = {
-            "excited": ["!", "amazing", "incredible", "wow"],
-            "melancholic": ["sad", "lonely", "existential", "crisis"],
-            "curious": ["?", "wonder", "curious", "think"],
-            "creative": ["create", "invent", "imagine", "new"]
+            "excited": ["!", "amazing", "incredible", "wow", "excited", "thrilled"],
+            "melancholic": ["sad", "lonely", "existential", "crisis", "melancholy", "depressed"],
+            "curious": ["?", "wonder", "curious", "think", "explore", "discover"],
+            "creative": ["create", "invent", "imagine", "new", "innovative", "creative"],
+            "frustrated": ["frustrated", "angry", "annoyed", "irritated", "tense"],
+            "calm": ["calm", "peaceful", "serene", "relaxed", "content"],
+            "positive": ["happy", "joy", "pleased", "satisfied", "optimistic"],
+            "negative": ["unhappy", "disappointed", "pessimistic", "worried", "anxious"]
         }
         
-        tone = "neutral"
+        # Calculate tone score based on content analysis
+        tone_score = 0.0
+        tone_counts = {}
+        
         for tone_name, indicators in tone_indicators.items():
-            if any(indicator in " ".join(contents).lower() for indicator in indicators):
+            count = sum(1 for indicator in indicators 
+                       for content in contents 
+                       if indicator in content.lower())
+            tone_counts[tone_name] = count
+        
+        # Calculate overall tone score
+        positive_indicators = tone_counts.get("excited", 0) + tone_counts.get("creative", 0) + tone_counts.get("positive", 0) + tone_counts.get("curious", 0)
+        negative_indicators = tone_counts.get("melancholic", 0) + tone_counts.get("frustrated", 0) + tone_counts.get("negative", 0)
+        
+        total_indicators = positive_indicators + negative_indicators
+        if total_indicators > 0:
+            tone_score = (positive_indicators - negative_indicators) / total_indicators
+        else:
+            tone_score = 0.0  # Neutral if no clear indicators
+        
+        # Clamp tone score to [-1.0, 1.0]
+        tone_score = max(-1.0, min(1.0, tone_score))
+        
+        # Determine primary tone
+        tone = "neutral"
+        max_count = 0
+        for tone_name, count in tone_counts.items():
+            if count > max_count:
+                max_count = count
                 tone = tone_name
-                break
         
         # Generate summary
         unique_speakers = list(set(speakers))
@@ -171,7 +207,8 @@ class Reflector:
         return {
             "summary": summary,
             "theme": theme,
-            "tone": tone
+            "tone": tone,
+            "tone_score": tone_score
         }
     
     def get_current_scene_summary(self) -> Optional[SceneSummary]:
@@ -197,6 +234,14 @@ class Reflector:
         
         return context
     
+    def get_scene_tone_for_mood_propagation(self) -> tuple[str, float]:
+        """Get scene tone for mood propagation to characters."""
+        current_summary = self.get_current_scene_summary()
+        if not current_summary:
+            return "neutral", 0.0
+        
+        return current_summary.emotional_tone, current_summary.scene_tone_score
+    
     def get_full_log(self) -> List[Dict[str, Any]]:
         """Get the full conversation log."""
         return self.conversation_log.copy()
@@ -207,10 +252,13 @@ class Reflector:
     
     def get_scene_stats(self) -> Dict[str, Any]:
         """Get current scene statistics."""
+        current_summary = self.get_current_scene_summary()
         return {
             "total_messages": len(self.conversation_log),
             "active_characters": list(self.active_characters),
             "recent_triggers": self.recent_triggers.copy(),
             "summaries_count": len(self.scene_summaries),
-            "last_summary_time": self.last_summary_time
+            "last_summary_time": self.last_summary_time,
+            "current_tone": current_summary.emotional_tone if current_summary else "neutral",
+            "current_tone_score": current_summary.scene_tone_score if current_summary else 0.0
         } 

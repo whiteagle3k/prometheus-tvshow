@@ -1,11 +1,28 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 
-function CharacterPanel({ characters, onCharacterInitialized }) {
+function CharacterPanel({ characters, onCharacterInitialized, onCharacterSelect }) {
   const [initializing, setInitializing] = useState({})
   const [showDesc, setShowDesc] = useState({})
+  const [characterMoods, setCharacterMoods] = useState({})
 
-  // Debug: log characters array
-  console.log('CharacterPanel characters:', characters)
+  // Fetch character moods
+  useEffect(() => {
+    const fetchMoods = async () => {
+      try {
+        const response = await fetch('/api/tvshow/characters/moods')
+        if (response.ok) {
+          const data = await response.json()
+          setCharacterMoods(data.moods || {})
+        }
+      } catch (error) {
+        console.error('Failed to fetch character moods:', error)
+      }
+    }
+    
+    fetchMoods()
+    const interval = setInterval(fetchMoods, 3000)
+    return () => clearInterval(interval)
+  }, [])
 
   const initializeCharacter = async (characterId) => {
     setInitializing(prev => ({ ...prev, [characterId]: true }))
@@ -23,6 +40,21 @@ function CharacterPanel({ characters, onCharacterInitialized }) {
     }
   }
 
+  const getMoodEmoji = (mood) => {
+    const emojis = {
+      'joy': '😊',
+      'excitement': '🤩',
+      'curiosity': '🤔',
+      'calm': '😌',
+      'melancholy': '😔',
+      'frustration': '😤',
+      'anger': '😠',
+      'anxiety': '😰',
+      'neutral': '😐'
+    }
+    return emojis[mood] || '😐'
+  }
+
   if (!characters || characters.length === 0) {
     return (
       <div className="sidebar-section">
@@ -38,36 +70,50 @@ function CharacterPanel({ characters, onCharacterInitialized }) {
       <ul className="character-list">
         {characters.map((character) => {
           const isRunning = character.status === 'running' || character.initialized
+          const moodData = characterMoods[character.id]
+          const moodEmoji = moodData ? getMoodEmoji(moodData.primary_mood) : '😐'
+          
           return (
-            <li key={character.id} className="character-item" style={{display:'flex', alignItems:'center', gap:8, padding:'8px 0'}}>
-              <span 
-                style={{cursor: 'pointer', color: '#4ecdc4', display:'flex', alignItems:'center'}}
-                title="Show description"
-                onClick={() => setShowDesc(prev => ({...prev, [character.id]: !prev[character.id]}))}
-              >
-                <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" style={{marginRight:4}}><circle cx="10" cy="10" r="9" stroke="#4ecdc4" strokeWidth="2" fill="none"/><text x="10" y="15" textAnchor="middle" fontSize="12" fill="#4ecdc4">i</text></svg>
-              </span>
-              <span className="character-name-small" style={{color:'#fff', fontWeight:'bold', marginRight:8}}>{character.name}</span>
-              <button
-                onClick={() => initializeCharacter(character.id)}
-                disabled={isRunning || initializing[character.id]}
-                style={{
-                  background: isRunning ? '#333' : initializing[character.id] ? '#888' : '#444',
-                  color: isRunning ? 'green' : '#fff',
-                  border: 'none',
-                  borderRadius: '4px',
-                  padding: '2px 10px',
-                  fontSize: '11px',
-                  cursor: isRunning ? 'default' : initializing[character.id] ? 'not-allowed' : 'pointer',
-                  marginLeft: 8,
-                  opacity: initializing[character.id] ? 0.7 : 1,
-                  minWidth: 70
-                }}
-              >
-                {isRunning ? 'Running' : initializing[character.id] ? 'Initializing...' : 'Initialize'}
-              </button>
+            <li key={character.id} className="character-item">
+              <div className="character-info">
+                <span 
+                  className="info-icon"
+                  title="Show description"
+                  onClick={() => setShowDesc(prev => ({...prev, [character.id]: !prev[character.id]}))}
+                >
+                  <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+                    <circle cx="10" cy="10" r="9" stroke="#4ecdc4" strokeWidth="2" fill="none"/>
+                    <text x="10" y="15" textAnchor="middle" fontSize="12" fill="#4ecdc4">i</text>
+                  </svg>
+                </span>
+                <span className="character-name">{character.name}</span>
+                <span className="mood-indicator" title={moodData?.primary_mood || 'neutral'}>
+                  {moodEmoji}
+                </span>
+              </div>
+              
+              <div className="character-controls">
+                <button
+                  onClick={() => initializeCharacter(character.id)}
+                  disabled={isRunning || initializing[character.id]}
+                  className={`init-btn ${isRunning ? 'running' : ''} ${initializing[character.id] ? 'initializing' : ''}`}
+                >
+                  {isRunning ? 'Running' : initializing[character.id] ? 'Initializing...' : 'Initialize'}
+                </button>
+                
+                {isRunning && (
+                  <button
+                    onClick={() => onCharacterSelect && onCharacterSelect(character.id)}
+                    className="memory-btn"
+                    title="View Memory"
+                  >
+                    🧠
+                  </button>
+                )}
+              </div>
+              
               {showDesc[character.id] && (
-                <div className="character-description" style={{background:'#222', color:'#ccc', borderRadius:4, padding:'6px 10px', marginLeft:12, zIndex:2, position:'absolute', marginTop:32, minWidth:180}}>
+                <div className="character-description">
                   {character.description}
                 </div>
               )}
