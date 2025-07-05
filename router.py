@@ -41,8 +41,27 @@ class TVShowRouter:
         # Setup routes
         self._setup_routes()
     
+    async def _auto_initialize_characters(self):
+        """Auto-initialize all characters on startup."""
+        print("🎭 Auto-initializing all TV show characters...")
+        
+        for character_id in get_all_characters().keys():
+            try:
+                character = await get_agent(character_id)
+                self.characters[character_id] = character
+                print(f"✅ Auto-initialized: {character_id}")
+            except Exception as e:
+                print(f"❌ Failed to auto-initialize {character_id}: {str(e)}")
+        
+        print(f"🎭 Auto-initialization complete. {len(self.characters)} characters ready.")
+    
     def _setup_routes(self):
         """Setup API routes."""
+        
+        # Add startup event to auto-initialize characters
+        @self.app.on_event("startup")
+        async def startup_event():
+            await self._auto_initialize_characters()
         
         # Serve UI static files
         ui_path = os.path.join(os.path.dirname(__file__), "ui", "dist")
@@ -67,10 +86,13 @@ class TVShowRouter:
             """Get all available characters."""
             character_list = []
             for name, entity_class in get_all_characters().items():
+                initialized = name in self.characters
                 character_list.append({
                     "id": name,
                     "name": entity_class.__name__,
-                    "description": entity_class.__doc__
+                    "description": entity_class.__doc__,
+                    "initialized": initialized,
+                    "status": "running" if initialized else "not_initialized"
                 })
             return {"characters": character_list}
         

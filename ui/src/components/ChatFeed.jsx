@@ -1,15 +1,23 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 
 function ChatFeed() {
   const [messages, setMessages] = useState([])
   const [newMessage, setNewMessage] = useState('')
   const [selectedCharacter, setSelectedCharacter] = useState('max')
   const [loading, setLoading] = useState(false)
+  const chatEndRef = useRef(null)
 
   // Fetch chat history on component mount
   useEffect(() => {
     fetchChatHistory()
   }, [])
+
+  // Auto-scroll to bottom on new messages
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [messages])
 
   const fetchChatHistory = async () => {
     try {
@@ -30,6 +38,16 @@ function ChatFeed() {
     e.preventDefault()
     if (!newMessage.trim()) return
 
+    const userMessage = {
+      character_id: 'user',
+      content: newMessage,
+      timestamp: Date.now() / 1000
+    }
+
+    // Add user message immediately to local state
+    setMessages(prev => [...prev, userMessage])
+    setNewMessage('')
+
     try {
       const response = await fetch('/api/tvshow/chat', {
         method: 'POST',
@@ -43,9 +61,8 @@ function ChatFeed() {
       })
 
       if (response.ok) {
-        setNewMessage('')
-        // Refresh chat history after sending
-        setTimeout(fetchChatHistory, 500)
+        // Fetch updated chat history to get the AI response
+        setTimeout(fetchChatHistory, 100)
       }
     } catch (error) {
       console.error('Failed to send message:', error)
@@ -60,48 +77,50 @@ function ChatFeed() {
 
   const getCharacterColor = (characterId) => {
     const colors = {
-      max: '#ff6b6b',
-      leo: '#4ecdc4',
-      emma: '#45b7aa',
-      marvin: '#96ceb4',
+      max: '#4ecdc4',
+      leo: '#45b7aa',
+      emma: '#5e60ce',
+      marvin: '#48bfe3',
       user: '#ffffff'
     }
     return colors[characterId] || '#888'
   }
 
   return (
-    <div className="chat-feed">
-      {loading ? (
-        <div className="loading">Loading chat history...</div>
-      ) : messages.length === 0 ? (
-        <div className="loading">No messages yet. Start the conversation!</div>
-      ) : (
-        messages.map((message, index) => (
-          <div key={index} className="message">
-            <div className="message-header">
-              <span 
-                className="character-name"
-                style={{ color: getCharacterColor(message.character_id) }}
-              >
-                {message.character_id === 'user' 
-                  ? 'You' 
-                  : message.character_id.charAt(0).toUpperCase() + message.character_id.slice(1)}
-              </span>
-              <span className="timestamp">
-                {formatTimestamp(message.timestamp)}
-              </span>
+    <div className="chat-feed" style={{display: 'flex', flexDirection: 'column', flex: 1, height: '100%'}}>
+      <div style={{flex: 1, overflowY: 'auto', marginBottom: 15}}>
+        {loading ? (
+          <div className="loading">Loading chat history...</div>
+        ) : messages.length === 0 ? (
+          <div className="loading">No messages yet. Start the conversation!</div>
+        ) : (
+          messages.map((message, index) => (
+            <div key={index} className="message">
+              <div className="message-header">
+                <span 
+                  className="character-name"
+                  style={{ color: getCharacterColor(message.character_id) }}
+                >
+                  {message.character_id === 'user' 
+                    ? 'You' 
+                    : message.character_id.charAt(0).toUpperCase() + message.character_id.slice(1)}
+                </span>
+                <span className="timestamp">
+                  {formatTimestamp(message.timestamp)}
+                </span>
+              </div>
+              <div className="message-content">
+                {typeof message.content === 'object' && message.content.response 
+                  ? message.content.response 
+                  : typeof message.content === 'string' 
+                    ? message.content 
+                    : JSON.stringify(message.content)}
+              </div>
             </div>
-            <div className="message-content">
-              {typeof message.content === 'object' && message.content.response 
-                ? message.content.response 
-                : typeof message.content === 'string' 
-                  ? message.content 
-                  : JSON.stringify(message.content)}
-            </div>
-          </div>
-        ))
-      )}
-      
+          ))
+        )}
+        <div ref={chatEndRef} />
+      </div>
       <form onSubmit={sendMessage} className="input-section">
         <select 
           value={selectedCharacter} 

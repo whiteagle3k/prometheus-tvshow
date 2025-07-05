@@ -50,6 +50,18 @@ function App() {
     }
   }
 
+  const fetchCharacters = async () => {
+    try {
+      const charactersResponse = await fetch('/api/tvshow/characters')
+      if (charactersResponse.ok) {
+        const charactersData = await charactersResponse.json()
+        setCharacters(charactersData.characters || [])
+      }
+    } catch (err) {
+      // Optionally handle error
+    }
+  }
+
   const refreshData = () => {
     fetchInitialData()
   }
@@ -89,7 +101,7 @@ function App() {
 
         <div className="sidebar">
           <StatusPanel status={status} />
-          <CharacterPanel characters={characters} />
+          <CharacterPanel characters={characters} onCharacterInitialized={fetchCharacters} />
           <ScenarioPanel scenarios={scenarios} onScenarioTrigger={refreshData} />
         </div>
       </div>
