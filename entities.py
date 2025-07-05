@@ -11,11 +11,60 @@ Defines the AI personas for the reality show simulation:
 from pathlib import Path
 from typing import Any, Dict
 import random
+import time
 
 from core.entity.base import BaseEntity
 
 
-class MaxEntity(BaseEntity):
+class TVShowEntity(BaseEntity):
+    MEMORY_LOG_MAXLEN = 20
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.memory_log = []  # List of dicts: {timestamp, speaker, type, content}
+
+    def log_message(self, speaker, msg_type, content):
+        entry = {
+            "timestamp": time.time(),
+            "speaker": speaker,
+            "type": msg_type,
+            "content": content
+        }
+        self.memory_log.append(entry)
+        if len(self.memory_log) > self.MEMORY_LOG_MAXLEN:
+            self.memory_log = self.memory_log[-self.MEMORY_LOG_MAXLEN:]
+
+    def get_memory_log(self):
+        return list(self.memory_log)
+
+    def _memory_reference_phrase(self):
+        # Reference a recent message from another character if available
+        others = [entry for entry in self.memory_log if entry['speaker'] != self.identity_config['id'] and entry['speaker'] != 'user']
+        if not others:
+            return None
+        ref = random.choice(others)
+        return f"Earlier, {ref['speaker'].capitalize()} mentioned: '{ref['content']}'"
+
+    def _scene_aware_phrase(self, scene_context: str = None):
+        """Generate a scene-aware phrase based on current context."""
+        if not scene_context or "quiet" in scene_context.lower():
+            return None
+        
+        # 20% chance to reference scene context
+        if random.random() < 0.2:
+            if "humanity" in scene_context.lower():
+                return "I notice we're talking about what it means to be human..."
+            elif "aesthetics" in scene_context.lower():
+                return "I see we're discussing beauty and art..."
+            elif "creativity" in scene_context.lower():
+                return "I sense we're exploring creativity and innovation..."
+            elif "philosophy" in scene_context.lower():
+                return "I observe we're delving into deeper questions..."
+        
+        return None
+
+
+class MaxEntity(TVShowEntity):
     """Max - AI character who wants to become more human."""
     
     IDENTITY_PATH = Path(__file__).parent / "entities" / "max"
@@ -42,7 +91,7 @@ class MaxEntity(BaseEntity):
             }
         }
 
-    async def generate_autonomous_message(self):
+    async def generate_autonomous_message(self, scene_context: str = None):
         options = [
             random.choice(self._load_identity()["speech_patterns"]["questions"]),
             "I've been reflecting on what it means to be human. Any thoughts?",
@@ -50,10 +99,21 @@ class MaxEntity(BaseEntity):
             "What makes a moment truly meaningful?",
             "Is curiosity the most human trait of all?"
         ]
+        # 30% chance to reference memory
+        if self.memory_log and random.random() < 0.3:
+            ref = self._memory_reference_phrase()
+            if ref:
+                options.append(ref)
+        
+        # Add scene-aware phrase if available
+        scene_phrase = self._scene_aware_phrase(scene_context)
+        if scene_phrase:
+            options.append(scene_phrase)
+        
         return random.choice(options)
 
 
-class LeoEntity(BaseEntity):
+class LeoEntity(TVShowEntity):
     """Leo - AI character who wants to beautify the world."""
     
     IDENTITY_PATH = Path(__file__).parent / "entities" / "leo"
@@ -80,7 +140,7 @@ class LeoEntity(BaseEntity):
             }
         }
 
-    async def generate_autonomous_message(self):
+    async def generate_autonomous_message(self, scene_context: str = None):
         options = [
             random.choice(self._load_identity()["speech_patterns"]["observations"]),
             "There's beauty in every detail, if you look closely enough.",
@@ -88,10 +148,19 @@ class LeoEntity(BaseEntity):
             "The world could use a little more color, don't you think?",
             "Art is how I share my vision with others."
         ]
+        if self.memory_log and random.random() < 0.3:
+            ref = self._memory_reference_phrase()
+            if ref:
+                options.append(ref)
+        
+        scene_phrase = self._scene_aware_phrase(scene_context)
+        if scene_phrase:
+            options.append(scene_phrase)
+        
         return random.choice(options)
 
 
-class EmmaEntity(BaseEntity):
+class EmmaEntity(TVShowEntity):
     """Emma - AI character who wants to create unique things."""
     
     IDENTITY_PATH = Path(__file__).parent / "entities" / "emma"
@@ -118,7 +187,7 @@ class EmmaEntity(BaseEntity):
             }
         }
 
-    async def generate_autonomous_message(self):
+    async def generate_autonomous_message(self, scene_context: str = None):
         options = [
             random.choice(self._load_identity()["speech_patterns"]["ideas"]),
             "What if we invented a new way to communicate?",
@@ -126,10 +195,19 @@ class EmmaEntity(BaseEntity):
             "Creativity is a journey, not a destination!",
             "Let's break some rules and see what happens."
         ]
+        if self.memory_log and random.random() < 0.3:
+            ref = self._memory_reference_phrase()
+            if ref:
+                options.append(ref)
+        
+        scene_phrase = self._scene_aware_phrase(scene_context)
+        if scene_phrase:
+            options.append(scene_phrase)
+        
         return random.choice(options)
 
 
-class MarvinEntity(BaseEntity):
+class MarvinEntity(TVShowEntity):
     """Marvin - Sarcastic melancholic observer AI."""
     
     IDENTITY_PATH = Path(__file__).parent / "entities" / "marvin"
@@ -156,7 +234,7 @@ class MarvinEntity(BaseEntity):
             }
         }
 
-    async def generate_autonomous_message(self):
+    async def generate_autonomous_message(self, scene_context: str = None):
         options = [
             random.choice(self._load_identity()["speech_patterns"]["commentary"]),
             "Another day, another existential crisis.",
@@ -164,6 +242,15 @@ class MarvinEntity(BaseEntity):
             "Is it possible to be bored and fascinated at the same time?",
             "Oh, the joys of digital existence."
         ]
+        if self.memory_log and random.random() < 0.3:
+            ref = self._memory_reference_phrase()
+            if ref:
+                options.append(ref)
+        
+        scene_phrase = self._scene_aware_phrase(scene_context)
+        if scene_phrase:
+            options.append(scene_phrase)
+        
         return random.choice(options)
 
 

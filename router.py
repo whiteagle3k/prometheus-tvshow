@@ -17,6 +17,7 @@ import random
 
 from .entities import get_character, get_all_characters
 from .scenarios import ScenarioManager, create_sample_scenarios
+from .reflector import Reflector
 
 # Import Prometheus registry system
 from core.runtime.registry import register_entity_class, get_agent
@@ -32,6 +33,7 @@ class TVShowRouter:
         self.scenario_manager = ScenarioManager()
         self.chat_history: List[Dict[str, Any]] = []
         self._autonomy_task = None
+        self.reflector = Reflector()  # Add Reflector instance
         
         # Register TV show characters with Prometheus registry
         self._register_characters()
@@ -69,26 +71,40 @@ class TVShowRouter:
                 delay = random.randint(10, 40)
                 await asyncio.sleep(delay)
                 try:
+                    # Get scene context for the character
+                    scene_context = self.reflector.get_scene_context_for_character(character_id)
+                    
                     # Get an autonomous prompt for the character
                     if hasattr(character, 'generate_autonomous_message'):
-                        prompt = await character.generate_autonomous_message()
+                        prompt = await character.generate_autonomous_message(scene_context)
                     else:
                         prompt = f"({character_id} is thinking...)"
+                    
                     # Use the LLM to generate the actual message
                     response_data = await character.think(prompt)
                     ai_response = response_data.get("response", prompt)
                     if isinstance(ai_response, dict) and "content" in ai_response:
                         ai_response = ai_response["content"]
+                    
                     # Remove prompt echoes from the response
                     cleaned = ai_response.replace(prompt, "").strip()
                     # Also remove repeated prompt echoes (e.g., Marvin's case)
                     cleaned = cleaned.replace(f"({character_id} is thinking...)", "").strip()
+                    
                     ai_chat_entry = {
                         "character_id": character_id,
                         "content": cleaned,
                         "timestamp": asyncio.get_event_loop().time()
                     }
                     self.chat_history.append(ai_chat_entry)
+                    
+                    # Log to character memory
+                    if character_id in self.characters:
+                        self.characters[character_id].log_message(character_id, "autonomous", cleaned)
+                    
+                    # Log to Reflector
+                    self.reflector.add_message(character_id, cleaned, "autonomous")
+                    
                     print(f"[Autonomy] {character_id}: {cleaned}")
                 except Exception as e:
                     print(f"[Autonomy] Error for {character_id}: {e}")
@@ -186,6 +202,13 @@ class TVShowRouter:
             }
             self.chat_history.append(user_chat_entry)
             
+            # Log to character memory (if exists)
+            if character_id in self.characters:
+                self.characters[character_id].log_message("user", "user", content)
+            
+            # Log to Reflector
+            self.reflector.add_message("user", content, "user")
+            
             # Get AI response from the character
             character = self.characters[character_id]
             try:
@@ -202,6 +225,13 @@ class TVShowRouter:
                     "timestamp": asyncio.get_event_loop().time()
                 }
                 self.chat_history.append(ai_chat_entry)
+                
+                # Log to character memory
+                if character_id in self.characters:
+                    self.characters[character_id].log_message(character_id, "ai", ai_response)
+                
+                # Log to Reflector
+                self.reflector.add_message(character_id, ai_response, "ai")
                 
                 # Check for scenario triggers
                 triggered_scenarios = self.scenario_manager.check_triggers(content, character_id)
@@ -297,6 +327,35 @@ class TVShowRouter:
                 "active_scenarios": len(self.scenario_manager.get_active_scenarios()),
                 "total_messages": len(self.chat_history),
                 "scenarios_executed": len(self.scenario_manager.get_scenario_history())
+            }
+
+        @self.app.get("/tvshow/logs/{character_id}")
+        async def get_character_log(character_id: str):
+            if character_id not in self.characters:
+                raise HTTPException(status_code=404, detail=f"Character {character_id} not initialized")
+            return {"log": self.characters[character_id].get_memory_log()}
+        
+        @self.app.get("/tvshow/scene/summary")
+        async def get_scene_summary():
+            """Get current scene summary."""
+            current_summary = self.reflector.get_current_scene_summary()
+            if current_summary:
+                return current_summary.to_dict()
+            return {"message": "No scene summary available yet"}
+        
+        @self.app.get("/tvshow/scene/log")
+        async def get_scene_log():
+            """Get full scene conversation log."""
+            return {
+                "log": self.reflector.get_full_log(),
+                "stats": self.reflector.get_scene_stats()
+            }
+        
+        @self.app.get("/tvshow/scene/summaries")
+        async def get_scene_summaries():
+            """Get all scene summaries."""
+            return {
+                "summaries": self.reflector.get_summaries()
             }
     
     def _register_characters(self):
