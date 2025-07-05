@@ -1,28 +1,10 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
+import { useWebSocketData } from './WebSocketProvider'
 
-function CharacterPanel({ characters, onCharacterInitialized, onCharacterSelect }) {
+function CharacterPanel({ onCharacterInitialized, onCharacterSelect }) {
+  const { characters = [], mood = {} } = useWebSocketData()
   const [initializing, setInitializing] = useState({})
   const [showDesc, setShowDesc] = useState({})
-  const [characterMoods, setCharacterMoods] = useState({})
-
-  // Fetch character moods
-  useEffect(() => {
-    const fetchMoods = async () => {
-      try {
-        const response = await fetch('/api/tvshow/characters/moods')
-        if (response.ok) {
-          const data = await response.json()
-          setCharacterMoods(data.moods || {})
-        }
-      } catch (error) {
-        console.error('Failed to fetch character moods:', error)
-      }
-    }
-    
-    fetchMoods()
-    const interval = setInterval(fetchMoods, 3000)
-    return () => clearInterval(interval)
-  }, [])
 
   const initializeCharacter = async (characterId) => {
     setInitializing(prev => ({ ...prev, [characterId]: true }))
@@ -70,9 +52,8 @@ function CharacterPanel({ characters, onCharacterInitialized, onCharacterSelect 
       <ul className="character-list">
         {characters.map((character) => {
           const isRunning = character.status === 'running' || character.initialized
-          const moodData = characterMoods[character.id]
+          const moodData = mood[character.id]
           const moodEmoji = moodData ? getMoodEmoji(moodData.primary_mood) : '😐'
-          
           return (
             <li key={character.id} className="character-item">
               <div className="character-info">
@@ -91,7 +72,6 @@ function CharacterPanel({ characters, onCharacterInitialized, onCharacterSelect 
                   {moodEmoji}
                 </span>
               </div>
-              
               <div className="character-controls">
                 <button
                   onClick={() => initializeCharacter(character.id)}
@@ -100,7 +80,6 @@ function CharacterPanel({ characters, onCharacterInitialized, onCharacterSelect 
                 >
                   {isRunning ? 'Running' : initializing[character.id] ? 'Initializing...' : 'Initialize'}
                 </button>
-                
                 {isRunning && (
                   <button
                     onClick={() => onCharacterSelect && onCharacterSelect(character.id)}
@@ -111,7 +90,6 @@ function CharacterPanel({ characters, onCharacterInitialized, onCharacterSelect 
                   </button>
                 )}
               </div>
-              
               {showDesc[character.id] && (
                 <div className="character-description">
                   {character.description}

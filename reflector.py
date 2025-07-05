@@ -213,10 +213,10 @@ class Reflector:
         }
     
     def get_current_scene_summary(self) -> Optional[SceneSummary]:
-        """Get the most recent scene summary."""
+        """Get the most recent scene summary, enriched with lore context."""
         if not self.scene_summaries:
             return None
-        summary = self._generate_summary()
+        summary = self.scene_summaries[-1]
         # Add lore context
         world_name = lore.get_world_name()
         law = lore.get_law_of_emergence()

@@ -1,6 +1,8 @@
 import React from 'react'
+import { useWebSocketData } from './WebSocketProvider'
 
-function StatusPanel({ status }) {
+function StatusPanel() {
+  const { status } = useWebSocketData()
   if (!status) {
     return (
       <div className="sidebar-section">
@@ -9,7 +11,6 @@ function StatusPanel({ status }) {
       </div>
     )
   }
-
   return (
     <div className="sidebar-section">
       <h3>System Status</h3>

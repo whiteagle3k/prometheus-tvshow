@@ -1,27 +1,22 @@
 import React, { useState } from 'react'
+import { useWebSocketData } from './WebSocketProvider'
 
-function ScenarioPanel({ scenarios, onScenarioTrigger }) {
+function ScenarioPanel({ onScenarioTrigger }) {
+  const { scenarios = [] } = useWebSocketData()
   const [activating, setActivating] = useState({})
   const [executing, setExecuting] = useState({})
 
   const activateScenario = async (scenarioId) => {
     setActivating(prev => ({ ...prev, [scenarioId]: true }))
-    
     try {
       const response = await fetch(`/api/tvshow/scenarios/${scenarioId}/activate`, {
         method: 'POST'
       })
-      
-      if (response.ok) {
-        console.log(`Scenario ${scenarioId} activated`)
-        if (onScenarioTrigger) {
-          onScenarioTrigger()
-        }
-      } else {
-        console.error(`Failed to activate scenario ${scenarioId}`)
+      if (response.ok && onScenarioTrigger) {
+        onScenarioTrigger()
       }
     } catch (error) {
-      console.error(`Error activating scenario ${scenarioId}:`, error)
+      // Optionally handle error
     } finally {
       setActivating(prev => ({ ...prev, [scenarioId]: false }))
     }
@@ -29,22 +24,15 @@ function ScenarioPanel({ scenarios, onScenarioTrigger }) {
 
   const executeScenario = async (scenarioId) => {
     setExecuting(prev => ({ ...prev, [scenarioId]: true }))
-    
     try {
       const response = await fetch(`/api/tvshow/scenarios/${scenarioId}/execute`, {
         method: 'POST'
       })
-      
-      if (response.ok) {
-        console.log(`Scenario ${scenarioId} executed`)
-        if (onScenarioTrigger) {
-          onScenarioTrigger()
-        }
-      } else {
-        console.error(`Failed to execute scenario ${scenarioId}`)
+      if (response.ok && onScenarioTrigger) {
+        onScenarioTrigger()
       }
     } catch (error) {
-      console.error(`Error executing scenario ${scenarioId}:`, error)
+      // Optionally handle error
     } finally {
       setExecuting(prev => ({ ...prev, [scenarioId]: false }))
     }

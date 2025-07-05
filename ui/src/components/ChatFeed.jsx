@@ -73,18 +73,22 @@ function ChatFeed() {
             <div key={index} className="message">
               <div className="message-header">
                 <div className="message-character">
-                  <span 
-                    className="character-name"
-                    style={{ color: getCharacterColor(message.character_id) }}
-                  >
-                    {message.character_id === 'user' 
-                      ? 'You' 
-                      : message.character_id.charAt(0).toUpperCase() + message.character_id.slice(1)}
-                  </span>
-                  {message.character_id !== 'user' && (
-                    <span className="mood-indicator" title="Character mood">
-                      {getMoodEmoji(message.character_id)}
+                  {message.character_id === 'user' ? (
+                    <span className="character-name" style={{ color: '#fff' }}>
+                      You
+                      {message.recipient && (
+                        <span style={{ color: '#888', fontWeight: 400 }}> → {message.recipient.charAt(0).toUpperCase() + message.recipient.slice(1)}</span>
+                      )}
                     </span>
+                  ) : (
+                    <>
+                      <span className="character-name" style={{ color: getCharacterColor(message.character_id) }}>
+                        {message.character_id.charAt(0).toUpperCase() + message.character_id.slice(1)}
+                      </span>
+                      <span className="mood-indicator" title="Character mood">
+                        {getMoodEmoji(message.character_id)}
+                      </span>
+                    </>
                   )}
                 </div>
                 <span className="timestamp">

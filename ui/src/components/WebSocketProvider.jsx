@@ -31,8 +31,30 @@ export function WebSocketProvider({ children }) {
             case 'chat':
               if (data.payload.history) {
                 setChat(data.payload.history)
+                // Optionally, store the latest timestamp in a ref for smarter deduplication
               } else if (data.payload.message) {
-                setChat(prev => [...prev, data.payload.message].slice(-50))
+                setChat(prev => {
+                  // Only append if this message is newer than the last in the array
+                  if (prev.length > 0) {
+                    const last = prev[prev.length - 1]
+                    if (
+                      data.payload.message.timestamp <= last.timestamp &&
+                      data.payload.message.character_id === last.character_id &&
+                      data.payload.message.content === last.content
+                    ) {
+                      return prev
+                    }
+                  }
+                  // Also check for any message in the array (for safety)
+                  const exists = prev.some(
+                    m =>
+                      m.timestamp === data.payload.message.timestamp &&
+                      m.character_id === data.payload.message.character_id &&
+                      m.content === data.payload.message.content
+                  )
+                  if (exists) return prev
+                  return [...prev, data.payload.message].slice(-50)
+                })
               }
               break
             case 'mood':

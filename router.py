@@ -22,6 +22,9 @@ from .reflector import Reflector
 # Import Prometheus registry system
 from core.runtime.registry import register_entity_class, get_agent
 from core.runtime.lifecycle import startup_system
+# Add imports for AgentManager and ChatContextBuilder
+from .agent_manager import AgentManager
+from .context_builder import ChatContextBuilder
 
 
 class TVShowRouter:
@@ -35,14 +38,14 @@ class TVShowRouter:
         self._autonomy_task = None
         self.reflector = Reflector()  # Add Reflector instance
         self.ws_clients = set()  # Set of connected WebSocket clients
-        
+        # AgentManager and ContextBuilder
+        self.agent_manager = AgentManager(self.characters)
+        self.context_builder = ChatContextBuilder(self.reflector, self.scenario_manager)
         # Register TV show characters with Prometheus registry
         self._register_characters()
-        
         # Initialize sample scenarios
         for scenario in create_sample_scenarios():
             self.scenario_manager.add_scenario(scenario)
-        
         # Setup routes
         self._setup_routes()
     
@@ -60,100 +63,6 @@ class TVShowRouter:
         
         print(f"🎭 Auto-initialization complete. {len(self.characters)} characters ready.")
     
-    async def _autonomous_character_loop(self):
-        """Background loop for autonomous character behavior."""
-        await asyncio.sleep(5)  # Wait a bit for system to finish startup
-        while True:
-            if not self.characters:
-                await asyncio.sleep(5)
-                continue
-            for character_id, character in self.characters.items():
-                # Random delay between 10-40 seconds
-                delay = random.randint(10, 40)
-                await asyncio.sleep(delay)
-                try:
-                    # Get scene context for the character
-                    scene_context = self.reflector.get_scene_context_for_character(character_id)
-                    
-                    # Get arc context for the character
-                    arc_context = self.scenario_manager.get_current_arc_context()
-                    
-                    # Apply mood propagation from scene tone
-                    scene_tone, tone_score = self.reflector.get_scene_tone_for_mood_propagation()
-                    if tone_score != 0.0:
-                        # Map scene tone to mood events
-                        mood_event_map = {
-                            "excited": "success",
-                            "creative": "success", 
-                            "positive": "success",
-                            "curious": "novelty",
-                            "calm": "relaxation",
-                            "melancholic": "failure",
-                            "frustrated": "failure",
-                            "negative": "failure",
-                            "agitated": "stress"
-                        }
-                        mood_event = mood_event_map.get(scene_tone, "novelty")
-                        character.apply_emotional_feedback(mood_event, abs(tone_score))
-                        print(f"[Mood] {character_id} affected by scene tone: {scene_tone} ({tone_score:.2f})")
-                        # Broadcast mood update
-                        asyncio.create_task(self._broadcast_event({"type": "mood", "payload": {character_id: character.get_mood()}}))
-                    
-                    # Get an autonomous prompt for the character
-                    if hasattr(character, 'generate_autonomous_message'):
-                        prompt = await character.generate_autonomous_message(scene_context, arc_context)
-                    else:
-                        prompt = f"({character_id} is thinking...)"
-                    
-                    # Use the LLM to generate the actual message
-                    response_data = await character.think(prompt)
-                    ai_response = response_data.get("response", prompt)
-                    if isinstance(ai_response, dict) and "content" in ai_response:
-                        ai_response = ai_response["content"]
-                    
-                    # Remove prompt echoes from the response
-                    cleaned = ai_response.replace(prompt, "").strip()
-                    # Also remove repeated prompt echoes (e.g., Marvin's case)
-                    cleaned = cleaned.replace(f"({character_id} is thinking...)", "").strip()
-                    
-                    ai_chat_entry = {
-                        "character_id": character_id,
-                        "content": cleaned,
-                        "timestamp": asyncio.get_event_loop().time()
-                    }
-                    self.chat_history.append(ai_chat_entry)
-                    # Broadcast chat update
-                    asyncio.create_task(self._broadcast_event({"type": "chat", "payload": {"message": ai_chat_entry}}))
-                    
-                    # Log to character memory
-                    if character_id in self.characters:
-                        self.characters[character_id].log_message(character_id, "autonomous", cleaned)
-                        # Broadcast memory update
-                        asyncio.create_task(self._broadcast_event({"type": "memory", "payload": {"character_id": character_id, "log": self.characters[character_id].get_memory_log()}}))
-                    
-                    # Log to Reflector
-                    self.reflector.add_message(character_id, cleaned, "autonomous")
-                    # Broadcast scene update
-                    scene_summary = self.reflector.get_current_scene_summary()
-                    if scene_summary:
-                        asyncio.create_task(self._broadcast_event({"type": "scene", "payload": scene_summary.to_dict()}))
-                    
-                    # Update narrative arcs with autonomous message
-                    arc_context_update = {
-                        "scene_content": cleaned,
-                        "active_characters": [character_id]
-                    }
-                    arc_transitions = self.scenario_manager.update_narrative_arcs(arc_context_update)
-                    if arc_transitions:
-                        print(f"[Arc] {arc_transitions}")
-                        # Broadcast narrative update
-                        arcs = [arc.to_dict() for arc in self.scenario_manager.get_all_narrative_arcs()]
-                        asyncio.create_task(self._broadcast_event({"type": "narrative", "payload": arcs}))
-                    
-                    print(f"[Autonomy] {character_id}: {cleaned}")
-                except Exception as e:
-                    print(f"[Autonomy] Error for {character_id}: {e}")
-
     async def _broadcast_event(self, event: dict):
         """Broadcast an event to all connected WebSocket clients."""
         to_remove = set()
@@ -166,21 +75,96 @@ class TVShowRouter:
 
     async def _send_initial_state(self, ws):
         """Send the latest state for all event types to a new client."""
-        # Chat
-        await ws.send_json({"type": "chat", "payload": {"history": self.chat_history[-50:]}})
-        # Mood
-        moods = {cid: char.get_mood() for cid, char in self.characters.items()}
-        await ws.send_json({"type": "mood", "payload": moods})
-        # Memory
-        for cid, char in self.characters.items():
-            await ws.send_json({"type": "memory", "payload": {"character_id": cid, "log": char.get_memory_log()}})
-        # Scene
+        try:
+            # Chat
+            await ws.send_json({"type": "chat", "payload": {"history": self.chat_history[-50:]}})
+            # Mood
+            moods = {cid: char.get_mood() for cid, char in self.characters.items()}
+            await ws.send_json({"type": "mood", "payload": moods})
+            # Memory
+            for cid, char in self.characters.items():
+                await ws.send_json({"type": "memory", "payload": {"character_id": cid, "log": char.get_memory_log()}})
+            # Scene
+            scene_summary = self.reflector.get_current_scene_summary()
+            if scene_summary:
+                await ws.send_json({"type": "scene", "payload": scene_summary.to_dict()})
+            # Narrative
+            arcs = list(self.scenario_manager.get_all_narrative_arcs())
+            await ws.send_json({"type": "narrative", "payload": arcs})
+            # Characters (NEW)
+            char_list = []
+            for cid, char in self.characters.items():
+                char_info = {
+                    "id": cid,
+                    "name": getattr(char, 'CHARACTER_NAME', cid),
+                    "description": getattr(char, 'CHARACTER_DESCRIPTION', ""),
+                    "status": "running" if hasattr(char, 'is_running') and char.is_running else "initialized",
+                    "initialized": True
+                }
+                char_list.append(char_info)
+            await ws.send_json({"type": "characters", "payload": char_list})
+            # Scenarios (NEW)
+            scenarios = []
+            for scenario in self.scenario_manager.get_all_scenarios():
+                scenarios.append({
+                    "scenario_id": getattr(scenario, 'scenario_id', None),
+                    "title": getattr(scenario, 'title', ""),
+                    "description": getattr(scenario, 'description', ""),
+                    "executed": getattr(scenario, 'executed', False)
+                })
+            await ws.send_json({"type": "scenarios", "payload": scenarios})
+            # Status (NEW)
+            status = {
+                "status": "running",
+                "characters_initialized": len(self.characters),
+                "total_characters": len(get_all_characters()),
+                "active_scenarios": len(self.scenario_manager.get_active_scenarios()),
+                "total_messages": len(self.chat_history),
+                "scenarios_executed": len(self.scenario_manager.get_scenario_history())
+            }
+            await ws.send_json({"type": "status", "payload": status})
+        except Exception as e:
+            print(f"[WebSocket Initial State Error] {e}")
+            import traceback; traceback.print_exc()
+            raise
+
+    async def _trigger_character_reply(self, character_id, user_message):
+        """Trigger a direct, context-rich reply from the specified character to a user message."""
+        if character_id not in self.characters:
+            return
+        character = self.characters[character_id]
+        # Gather context
+        scene_context = self.reflector.get_scene_context_for_character(character_id)
+        arc_context = self.scenario_manager.get_current_arc_context()
+        # Build a prompt as a direct reply to the user
+        if hasattr(character, 'generate_autonomous_message'):
+            prompt = await character.generate_autonomous_message(
+                scene_context=scene_context,
+                arc_context=arc_context,
+                user_message=user_message
+            )
+        else:
+            prompt = user_message
+        response_data = await character.think(prompt)
+        ai_response = response_data.get("response", prompt)
+        if isinstance(ai_response, dict) and "content" in ai_response:
+            ai_response = ai_response["content"]
+        cleaned = ai_response.replace(prompt, "").strip()
+        ai_chat_entry = {
+            "character_id": character_id,
+            "content": cleaned,
+            "timestamp": asyncio.get_event_loop().time()
+        }
+        self.chat_history.append(ai_chat_entry)
+        asyncio.create_task(self._broadcast_event({"type": "chat", "payload": {"message": ai_chat_entry}}))
+        # Log to character memory, Reflector, etc. as needed
+        character.log_message("user", "user", user_message)
+        self.reflector.add_message(character_id, cleaned, "autonomous")
+        # Broadcast memory and scene updates
+        asyncio.create_task(self._broadcast_event({"type": "memory", "payload": {"character_id": character_id, "log": character.get_memory_log()}}))
         scene_summary = self.reflector.get_current_scene_summary()
         if scene_summary:
-            await ws.send_json({"type": "scene", "payload": scene_summary.to_dict()})
-        # Narrative
-        arcs = [arc.to_dict() for arc in self.scenario_manager.get_all_narrative_arcs()]
-        await ws.send_json({"type": "narrative", "payload": arcs})
+            asyncio.create_task(self._broadcast_event({"type": "scene", "payload": scene_summary.to_dict()}))
 
     def _setup_routes(self):
         """Setup API routes."""
@@ -189,9 +173,9 @@ class TVShowRouter:
         @self.app.on_event("startup")
         async def startup_event():
             await self._auto_initialize_characters()
-            # Start background autonomy loop
-            if not self._autonomy_task:
-                self._autonomy_task = asyncio.create_task(self._autonomous_character_loop())
+            # REMOVE: Do not start background autonomy loop
+            # if not self._autonomy_task:
+            #     self._autonomy_task = asyncio.create_task(self._autonomous_character_loop())
         
         # Serve UI static files
         ui_path = os.path.join(os.path.dirname(__file__), "ui", "dist")
@@ -257,30 +241,100 @@ class TVShowRouter:
         
         @self.app.post("/tvshow/chat")
         async def send_message(message: Dict[str, Any]):
-            """Send a message as a character or user."""
-            character_id = message.get("character_id", "user")
-            content = message.get("content", "")
+            """Send a message to the chat and get AI response."""
+            character_id = message.get("character_id")
+            content = message.get("content")
+            if not content:
+                raise HTTPException(status_code=400, detail="content is required")
+            # Build context for this message
+            context = self.context_builder.build_context(character_id, content)
+            arc_id = context.get("arc_id")
+            phase_id = context.get("phase_id")
             timestamp = asyncio.get_event_loop().time()
-            chat_entry = {
-                "character_id": character_id,
+            # If no character_id, treat as scene message (no agent response)
+            if not character_id:
+                scene_chat_entry = {
+                    "character_id": "scene",
+                    "content": content,
+                    "timestamp": timestamp,
+                    "arc_id": arc_id,
+                    "phase_id": phase_id
+                }
+                self.chat_history.append(scene_chat_entry)
+                asyncio.create_task(self._broadcast_event({"type": "chat", "payload": {"message": scene_chat_entry}}))
+                self.reflector.add_message("scene", content, "scene")
+                # Still check for arc/scenario triggers
+                triggered_arcs = self.scenario_manager.check_arc_triggers(content, "scene")
+                for arc in triggered_arcs:
+                    self.scenario_manager.activate_narrative_arc(arc.arc_id)
+                triggered_scenarios = self.scenario_manager.check_triggers(content, "scene")
+                # Update arcs with context
+                scene_context = {
+                    "scene_content": content,
+                    "active_characters": ["scene"]
+                }
+                arc_transitions = self.scenario_manager.update_narrative_arcs(scene_context)
+                # Broadcast scene/narrative updates
+                scene_summary = self.reflector.get_current_scene_summary()
+                if scene_summary:
+                    asyncio.create_task(self._broadcast_event({"type": "scene", "payload": scene_summary.to_dict()}))
+                arcs = list(self.scenario_manager.get_all_narrative_arcs())
+                asyncio.create_task(self._broadcast_event({"type": "narrative", "payload": arcs}))
+                return {"status": "success", "message": "Scene message logged", "scene_message": scene_chat_entry}
+            # Otherwise, normal agent message
+            user_chat_entry = {
+                "character_id": "user",
                 "content": content,
-                "timestamp": timestamp
+                "timestamp": timestamp,
+                "arc_id": arc_id,
+                "phase_id": phase_id
             }
-            self.chat_history.append(chat_entry)
-            # Broadcast chat update
-            asyncio.create_task(self._broadcast_event({"type": "chat", "payload": {"message": chat_entry}}))
-            # Log to character memory if not user
-            if character_id in self.characters:
-                self.characters[character_id].log_message("user", "user", content)
-                # Broadcast memory update
-                asyncio.create_task(self._broadcast_event({"type": "memory", "payload": {"character_id": character_id, "log": self.characters[character_id].get_memory_log()}}))
-            # Log to Reflector
-            self.reflector.add_message(character_id, content, "user")
-            # Broadcast scene update
+            self.chat_history.append(user_chat_entry)
+            asyncio.create_task(self._broadcast_event({"type": "chat", "payload": {"message": user_chat_entry}}))
+            self.characters[character_id].log_message("user", "user", content)
+            self.reflector.add_message("user", content, "user")
+            triggered_arcs = self.scenario_manager.check_arc_triggers(content, character_id)
+            for arc in triggered_arcs:
+                self.scenario_manager.activate_narrative_arc(arc.arc_id)
+            # Route message to agent via AgentManager
+            agent_result = await self.agent_manager.route_message_to_agent(
+                character_id, content, context=context, metadata=None
+            )
+            ai_response = agent_result.get("response")
+            if isinstance(ai_response, dict) and "content" in ai_response:
+                ai_response = ai_response["content"]
+            ai_chat_entry = {
+                "character_id": character_id,
+                "content": ai_response,
+                "timestamp": asyncio.get_event_loop().time(),
+                "arc_id": arc_id,
+                "phase_id": phase_id
+            }
+            self.chat_history.append(ai_chat_entry)
+            asyncio.create_task(self._broadcast_event({"type": "chat", "payload": {"message": ai_chat_entry}}))
+            self.characters[character_id].log_message(character_id, "ai", ai_response)
+            self.reflector.add_message(character_id, ai_response, "ai")
+            triggered_scenarios = self.scenario_manager.check_triggers(content, character_id)
+            scene_context = {
+                "scene_content": content + " " + str(ai_response),
+                "active_characters": [character_id, "user"]
+            }
+            arc_transitions = self.scenario_manager.update_narrative_arcs(scene_context)
+            asyncio.create_task(self._broadcast_event({"type": "memory", "payload": {"character_id": character_id, "log": self.characters[character_id].get_memory_log()}}))
             scene_summary = self.reflector.get_current_scene_summary()
             if scene_summary:
                 asyncio.create_task(self._broadcast_event({"type": "scene", "payload": scene_summary.to_dict()}))
-            return {"status": "success"}
+            arcs = list(self.scenario_manager.get_all_narrative_arcs())
+            asyncio.create_task(self._broadcast_event({"type": "narrative", "payload": arcs}))
+            return {
+                "status": "success",
+                "message": "Message sent and AI responded",
+                "user_message": user_chat_entry,
+                "ai_response": ai_chat_entry,
+                "triggered_scenarios": [s.scenario_id for s in triggered_scenarios],
+                "triggered_arcs": [arc.arc_id for arc in triggered_arcs],
+                "arc_transitions": arc_transitions
+            }
         
         @self.app.get("/tvshow/chat/history")
         async def get_chat_history(limit: int = 50):
