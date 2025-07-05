@@ -27,7 +27,7 @@ export function WebSocketProvider({ children }) {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data)
-          console.log(data)
+          //console.log(data)
           switch (data.type) {
             case 'chat':
               if (data.payload.history) {

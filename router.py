@@ -78,7 +78,7 @@ class TVShowRouter:
             router.register_target(TargetType.ENTITY, character_id, make_character_handler(character))
 
     async def _broadcast_event(self, event: dict):
-        print(f"[DEBUG] Broadcasting event: {event}")
+        #print(f"[DEBUG] Broadcasting event: {event}")
         """Broadcast an event to all connected WebSocket clients."""
         to_remove = set()
         for ws in self.ws_clients:
