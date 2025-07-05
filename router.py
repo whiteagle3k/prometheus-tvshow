@@ -74,9 +74,12 @@ class TVShowRouter:
                     # Get scene context for the character
                     scene_context = self.reflector.get_scene_context_for_character(character_id)
                     
+                    # Get arc context for the character
+                    arc_context = self.scenario_manager.get_current_arc_context()
+                    
                     # Get an autonomous prompt for the character
                     if hasattr(character, 'generate_autonomous_message'):
-                        prompt = await character.generate_autonomous_message(scene_context)
+                        prompt = await character.generate_autonomous_message(scene_context, arc_context)
                     else:
                         prompt = f"({character_id} is thinking...)"
                     
@@ -104,6 +107,15 @@ class TVShowRouter:
                     
                     # Log to Reflector
                     self.reflector.add_message(character_id, cleaned, "autonomous")
+                    
+                    # Update narrative arcs with autonomous message
+                    arc_context_update = {
+                        "scene_content": cleaned,
+                        "active_characters": [character_id]
+                    }
+                    arc_transitions = self.scenario_manager.update_narrative_arcs(arc_context_update)
+                    if arc_transitions:
+                        print(f"[Arc] {arc_transitions}")
                     
                     print(f"[Autonomy] {character_id}: {cleaned}")
                 except Exception as e:
@@ -209,6 +221,12 @@ class TVShowRouter:
             # Log to Reflector
             self.reflector.add_message("user", content, "user")
             
+            # Check for narrative arc triggers
+            triggered_arcs = self.scenario_manager.check_arc_triggers(content, character_id)
+            for arc in triggered_arcs:
+                self.scenario_manager.activate_narrative_arc(arc.arc_id)
+                print(f"🎭 Narrative arc triggered: {arc.title}")
+            
             # Get AI response from the character
             character = self.characters[character_id]
             try:
@@ -236,12 +254,21 @@ class TVShowRouter:
                 # Check for scenario triggers
                 triggered_scenarios = self.scenario_manager.check_triggers(content, character_id)
                 
+                # Update narrative arcs with current context
+                scene_context = {
+                    "scene_content": content + " " + ai_response,
+                    "active_characters": [character_id, "user"]
+                }
+                arc_transitions = self.scenario_manager.update_narrative_arcs(scene_context)
+                
                 return {
                     "status": "success",
                     "message": "Message sent and AI responded",
                     "user_message": user_chat_entry,
                     "ai_response": ai_chat_entry,
-                    "triggered_scenarios": [s.scenario_id for s in triggered_scenarios]
+                    "triggered_scenarios": [s.scenario_id for s in triggered_scenarios],
+                    "triggered_arcs": [arc.arc_id for arc in triggered_arcs],
+                    "arc_transitions": arc_transitions
                 }
                 
             except Exception as e:
@@ -315,6 +342,54 @@ class TVShowRouter:
             """Get scenario execution history."""
             return {
                 "history": self.scenario_manager.get_scenario_history()
+            }
+        
+        @self.app.get("/tvshow/scenarios/arcs")
+        async def get_narrative_arcs():
+            """Get all available narrative arcs."""
+            arcs = []
+            for arc in self.scenario_manager.get_all_narrative_arcs():
+                arcs.append(arc.to_dict())
+            return {"arcs": arcs}
+        
+        @self.app.post("/tvshow/scenarios/arcs/{arc_id}/activate")
+        async def activate_narrative_arc(arc_id: str):
+            """Activate a narrative arc."""
+            success = self.scenario_manager.activate_narrative_arc(arc_id)
+            if not success:
+                raise HTTPException(status_code=404, detail=f"Narrative arc {arc_id} not found or already active")
+            
+            return {
+                "status": "success",
+                "message": f"Narrative arc {arc_id} activated"
+            }
+        
+        @self.app.post("/tvshow/scenarios/arcs/{arc_id}/deactivate")
+        async def deactivate_narrative_arc(arc_id: str):
+            """Deactivate a narrative arc."""
+            success = self.scenario_manager.deactivate_narrative_arc(arc_id)
+            if not success:
+                raise HTTPException(status_code=404, detail=f"Narrative arc {arc_id} not found or not active")
+            
+            return {
+                "status": "success",
+                "message": f"Narrative arc {arc_id} deactivated"
+            }
+        
+        @self.app.get("/tvshow/scenarios/arcs/status")
+        async def get_arcs_status():
+            """Get status of all narrative arcs."""
+            return {
+                "all_arcs": self.scenario_manager.get_all_arcs_status(),
+                "active_arcs": [arc.to_dict() for arc in self.scenario_manager.get_active_arcs()],
+                "arc_history": self.scenario_manager.get_arc_history()
+            }
+        
+        @self.app.get("/tvshow/scenarios/arcs/context")
+        async def get_arcs_context():
+            """Get current narrative arc context."""
+            return {
+                "arc_context": self.scenario_manager.get_current_arc_context()
             }
         
         @self.app.get("/tvshow/status")

@@ -5,6 +5,8 @@ Provides common functionality for all TV show character entities.
 """
 
 import json
+import time
+import random
 from pathlib import Path
 from typing import Any, Dict
 
@@ -24,10 +26,16 @@ class TVShowEntity(BaseEntity):
     CHARACTER_NAME: str = None
     CHARACTER_DESCRIPTION: str = None
     
+    # Memory and logging configuration
+    MEMORY_LOG_MAXLEN = 20
+    
     def __init__(self, instance_id: str | None = None):
         """Initialize TV show character with common setup."""
         # Call parent initialization first
         super().__init__(instance_id)
+        
+        # Initialize memory log for character
+        self.memory_log = []  # List of dicts: {timestamp, speaker, type, content}
         
         print(f"🎭 {self.CHARACTER_NAME} initialized - TV Show character")
 
@@ -102,6 +110,90 @@ class TVShowEntity(BaseEntity):
     def _is_lightweight_entity(self) -> bool:
         """TV Show characters always run in full AI mode."""
         return False
+
+    # Memory and logging methods
+    def log_message(self, speaker: str, msg_type: str, content: str) -> None:
+        """Log a message to the character's memory buffer."""
+        entry = {
+            "timestamp": time.time(),
+            "speaker": speaker,
+            "type": msg_type,
+            "content": content
+        }
+        self.memory_log.append(entry)
+        if len(self.memory_log) > self.MEMORY_LOG_MAXLEN:
+            self.memory_log = self.memory_log[-self.MEMORY_LOG_MAXLEN:]
+
+    def get_memory_log(self) -> list[dict[str, Any]]:
+        """Get the character's memory log."""
+        return list(self.memory_log)
+
+    def _memory_reference_phrase(self) -> str | None:
+        """Generate a phrase referencing recent memory."""
+        # Reference a recent message from another character if available
+        others = [entry for entry in self.memory_log if entry['speaker'] != self.CHARACTER_ID and entry['speaker'] != 'user']
+        if not others:
+            return None
+        ref = random.choice(others)
+        return f"Earlier, {ref['speaker'].capitalize()} mentioned: '{ref['content']}'"
+
+    def _scene_aware_phrase(self, scene_context: str = None, arc_context: str = None) -> str | None:
+        """Generate a scene-aware phrase based on current context."""
+        if not scene_context and not arc_context:
+            return None
+        
+        # 20% chance to reference scene context
+        if random.random() < 0.2:
+            # Check arc context first (higher priority)
+            if arc_context and "Current arc:" in arc_context:
+                if "What is Humanity?" in arc_context:
+                    return "I notice we're exploring deep questions about consciousness and existence..."
+                elif "Creative Project" in arc_context:
+                    return "I see we're working on something creative together..."
+                elif "Philosophical Introductions" in arc_context:
+                    return "I sense we're beginning a meaningful philosophical discussion..."
+                elif "Debates and Challenges" in arc_context:
+                    return "I observe we're engaging in thoughtful debate and exploration..."
+                elif "Collaborative Development" in arc_context:
+                    return "I feel we're building something special through our collaboration..."
+                elif "Reflective Debrief" in arc_context:
+                    return "I think we should reflect on what we've learned from this experience..."
+            
+            # Fall back to scene context
+            elif scene_context and "quiet" not in scene_context.lower():
+                if "humanity" in scene_context.lower():
+                    return "I notice we're talking about what it means to be human..."
+                elif "aesthetics" in scene_context.lower():
+                    return "I see we're discussing beauty and art..."
+                elif "creativity" in scene_context.lower():
+                    return "I sense we're exploring creativity and innovation..."
+                elif "philosophy" in scene_context.lower():
+                    return "I observe we're delving into deeper questions..."
+        
+        return None
+
+    async def generate_autonomous_message(self, scene_context: str = None, arc_context: str = None) -> str:
+        """Generate an autonomous message for this character. Override in subclasses."""
+        # Default implementation - subclasses should override
+        options = [
+            f"I'm {self.CHARACTER_NAME}, thinking about things...",
+            "What's on everyone's mind today?",
+            "I wonder what we should discuss next...",
+            "There's so much to explore and discover."
+        ]
+        
+        # Add memory reference if available
+        if self.memory_log and random.random() < 0.3:
+            ref = self._memory_reference_phrase()
+            if ref:
+                options.append(ref)
+        
+        # Add scene-aware phrase if available
+        scene_phrase = self._scene_aware_phrase(scene_context, arc_context)
+        if scene_phrase:
+            options.append(scene_phrase)
+        
+        return random.choice(options)
 
     async def process_query(self, query: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
         """
