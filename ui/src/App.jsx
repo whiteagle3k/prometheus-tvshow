@@ -76,16 +76,16 @@ function App() {
                 </>
               )}
               {activeTab === 'memory' && (
-                <MemoryPanel selectedCharacter={selectedCharacter} />
+                <MemoryPanel selectedCharacter={selectedCharacter} className="single-panel" />
               )}
               {activeTab === 'scene' && (
-                <ScenePanel />
+                <ScenePanel className="single-panel" />
               )}
               {activeTab === 'narrative' && (
-                <NarrativePanel />
+                <NarrativePanel className="single-panel" />
               )}
               {activeTab === 'mood' && (
-                <MoodPanel />
+                <MoodPanel className="single-panel" />
               )}
             </div>
           </div>

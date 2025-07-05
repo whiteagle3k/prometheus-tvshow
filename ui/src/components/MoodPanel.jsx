@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useWebSocketData } from './WebSocketProvider'
 
-function MoodPanel() {
+function MoodPanel({ className }) {
   const { mood } = useWebSocketData()
   const [selectedCharacter, setSelectedCharacter] = useState(null)
   const [moodFeedback, setMoodFeedback] = useState('')
@@ -52,7 +52,7 @@ function MoodPanel() {
   }
 
   return (
-    <div className="sidebar-section">
+    <div className={`sidebar-section${className ? ' ' + className : ''}`}>
       <h3>Emotional States</h3>
       <div className="mood-content">
         <div className="moods-overview">

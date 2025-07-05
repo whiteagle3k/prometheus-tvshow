@@ -1,7 +1,7 @@
 import React from 'react'
 import { useWebSocketData } from './WebSocketProvider'
 
-function NarrativePanel() {
+function NarrativePanel({ className }) {
   const { narrative } = useWebSocketData()
 
   const getPhaseColor = (phase) => {
@@ -26,7 +26,7 @@ function NarrativePanel() {
   }
 
   return (
-    <div className="sidebar-section">
+    <div className={`sidebar-section${className ? ' ' + className : ''}`}>
       <h3>Narrative Arcs</h3>
       <div className="narrative-content">
         <div className="available-arcs">

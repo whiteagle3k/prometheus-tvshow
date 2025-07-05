@@ -12,6 +12,10 @@ export function WebSocketProvider({ children }) {
   const [memory, setMemory] = useState({})
   const [scene, setScene] = useState(null)
   const [narrative, setNarrative] = useState([])
+  // Add new state for status, characters, scenarios
+  const [status, setStatus] = useState(null)
+  const [characters, setCharacters] = useState([])
+  const [scenarios, setScenarios] = useState([])
   const wsRef = useRef(null)
   const reconnectTimeout = useRef(null)
 
@@ -70,6 +74,16 @@ export function WebSocketProvider({ children }) {
             case 'narrative':
               setNarrative(data.payload)
               break
+            // Add handlers for new event types
+            case 'status':
+              setStatus(data.payload)
+              break
+            case 'characters':
+              setCharacters(data.payload)
+              break
+            case 'scenarios':
+              setScenarios(data.payload)
+              break
             default:
               break
           }
@@ -99,7 +113,10 @@ export function WebSocketProvider({ children }) {
     mood,
     memory,
     scene,
-    narrative
+    narrative,
+    status,      // Expose new state
+    characters,  // Expose new state
+    scenarios    // Expose new state
   }
 
   return (

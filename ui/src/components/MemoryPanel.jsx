@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useWebSocketData } from './WebSocketProvider'
 
-function MemoryPanel({ selectedCharacter }) {
+function MemoryPanel({ selectedCharacter, className }) {
   const { memory } = useWebSocketData()
   const [showMemory, setShowMemory] = useState(false)
 
@@ -32,8 +32,14 @@ function MemoryPanel({ selectedCharacter }) {
     )
   }
 
+  // Determine if single-panel stretching should be applied
+  const isSinglePanel = className && className.includes('single-panel');
+
   return (
-    <div className="sidebar-section">
+    <div
+      className={`sidebar-section${className ? ' ' + className : ''}`}
+      style={isSinglePanel ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } : undefined}
+    >
       <div className="section-header">
         <h3>Memory: {selectedCharacter}</h3>
         <button 
@@ -48,42 +54,52 @@ function MemoryPanel({ selectedCharacter }) {
           <div className="memory-buffer">
             <h4>Recent Memory Buffer</h4>
             <div className="memory-items">
-              {logs.slice(-5).map((log, index) => (
-                <div key={index} className="memory-item">
-                  <div className="memory-header">
-                    <span className="memory-type" style={{ color: getMessageTypeColor(log.type) }}>
-                      {log.type}
-                    </span>
-                    <span className="memory-timestamp">
-                      {formatTimestamp(log.timestamp)}
-                    </span>
+              {logs.slice(-5).map((log, index) => {
+                if (!log || typeof log !== 'object' || !('type' in log) || !('timestamp' in log) || !('content' in log)) return null;
+                return (
+                  <div key={index} className="memory-item">
+                    <div className="memory-header">
+                      <span className="memory-type" style={{ color: getMessageTypeColor(log.type) }}>
+                        {log.type}
+                      </span>
+                      <span className="memory-timestamp">
+                        {formatTimestamp(log.timestamp)}
+                      </span>
+                    </div>
+                    <div className="memory-content-text">
+                      {typeof log.content === 'object' && log.content !== null
+                        ? JSON.stringify(log.content)
+                        : log.content}
+                    </div>
                   </div>
-                  <div className="memory-content-text">
-                    {log.content}
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         )}
         <div className="logs-section">
           <h4>Activity Log</h4>
-          <div className="logs-list">
-            {logs.map((log, index) => (
-              <div key={index} className="log-item">
-                <div className="log-header">
-                  <span className="log-type" style={{ color: getMessageTypeColor(log.type) }}>
-                    {log.type}
-                  </span>
-                  <span className="log-timestamp">
-                    {formatTimestamp(log.timestamp)}
-                  </span>
+          <div>
+            {logs.map((log, index) => {
+              if (!log || typeof log !== 'object' || !('type' in log) || !('timestamp' in log) || !('content' in log)) return null;
+              return (
+                <div key={index} className="log-item">
+                  <div className="log-header">
+                    <span className="log-type" style={{ color: getMessageTypeColor(log.type) }}>
+                      {log.type}
+                    </span>
+                    <span className="log-timestamp">
+                      {formatTimestamp(log.timestamp)}
+                    </span>
+                  </div>
+                  <div className="log-content">
+                    {typeof log.content === 'object' && log.content !== null
+                      ? JSON.stringify(log.content)
+                      : log.content}
+                  </div>
                 </div>
-                <div className="log-content">
-                  {log.content}
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       </div>

@@ -85,8 +85,9 @@ function CharacterPanel({ onCharacterInitialized, onCharacterSelect }) {
                     onClick={() => onCharacterSelect && onCharacterSelect(character.id)}
                     className="memory-btn"
                     title="View Memory"
+                    style={{ background: '#222', border: '1px solid #444', color: '#fff', borderRadius: '6px', padding: '4px 8px', marginLeft: '6px', fontSize: '12px', cursor: 'pointer' }}
                   >
-                    🧠
+                    Memory {'>'}
                   </button>
                 )}
               </div>

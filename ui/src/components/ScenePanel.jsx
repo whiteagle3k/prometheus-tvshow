@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useWebSocketData } from './WebSocketProvider'
 
-function ScenePanel() {
+function ScenePanel({ className }) {
   const { scene } = useWebSocketData()
   const [activeTab, setActiveTab] = useState('current')
 
@@ -27,7 +27,7 @@ function ScenePanel() {
   }
 
   return (
-    <div className="sidebar-section">
+    <div className={`sidebar-section${className ? ' ' + className : ''}`}>
       <h3>Scene Context</h3>
       <div className="tab-buttons">
         <button 

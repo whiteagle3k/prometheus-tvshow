@@ -64,8 +64,8 @@ function ChatFeed() {
   }
 
   return (
-    <div className="chat-feed" style={{display: 'flex', flexDirection: 'column', flex: 1, height: '100%'}}>
-      <div ref={chatScrollRef} style={{flex: 1, overflowY: 'auto', marginBottom: 15}}>
+    <div className="chat-feed" style={{display: 'flex', flexDirection: 'column', height: '100%'}}>
+      <div className="chat-messages" ref={chatScrollRef} style={{flex: 1, overflowY: 'auto', minHeight: 0}}>
         {chat.length === 0 ? (
           <div className="loading">No messages yet. Start the conversation!</div>
         ) : (

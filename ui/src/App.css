@@ -1,1 +1,125 @@
 /* App-specific styles */ 
+
+/* Make the main-content fill the viewport height minus header */
+.main-content {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
+/* Sidebar stretches to bottom */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 320px;
+  max-width: 350px;
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.sidebar-content {
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  margin: 0;
+}
+
+/* MemoryPanel stretches */
+.sidebar-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.single-panel {
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.memory-content, .logs-section, .memory-buffer {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* Chat feed scrollable */
+.chat-section {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.chat-header {
+  flex: 0 0 auto;
+}
+
+/* Make chat feed scrollable and fixed height */
+.chat-feed {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
+} 
+
+.chat-messages {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Custom scrollbar for chat, memory, and narrative */
+.chat-messages::-webkit-scrollbar,
+.memory-content::-webkit-scrollbar,
+.narrative-content::-webkit-scrollbar {
+  width: 6px;
+  background: #222;
+}
+.chat-messages::-webkit-scrollbar-thumb,
+.memory-content::-webkit-scrollbar-thumb,
+.narrative-content::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 4px;
+}
+.chat-messages {
+  scrollbar-width: thin;
+  scrollbar-color: #444 #222;
+}
+.memory-content,
+.narrative-content {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #444 #222;
+}
+
+.section-header {
+  flex: 0 0 auto;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
+}
+
+.header {
+  flex: 0 0 auto;
+} 
