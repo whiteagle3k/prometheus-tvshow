@@ -12,6 +12,7 @@ from typing import Any, Dict
 
 from core.entity import BaseEntity
 from core.affect import MoodEngine, MoodState
+from extensions.tvshow.lore_engine import lore
 
 
 class TVShowEntity(BaseEntity):
@@ -235,7 +236,10 @@ class TVShowEntity(BaseEntity):
         scene_phrase = self._scene_aware_phrase(scene_context, arc_context)
         mood_phrase = self._mood_aware_phrase()
         mood = self.get_mood()
-        
+        # Lore context
+        core_dream = lore.get_core_dream(self.CHARACTER_ID)
+        traits = lore.get_traits(self.CHARACTER_ID)
+        law = lore.get_law_of_emergence()
         # Build context block
         context_lines = []
         if scene_context:
@@ -250,9 +254,14 @@ class TVShowEntity(BaseEntity):
             context_lines.append(f"[Scene insight] {scene_phrase}")
         if mood_phrase:
             context_lines.append(f"[Mood expression] {mood_phrase}")
-        
+        # Lore
+        if core_dream:
+            context_lines.append(f"[Core Dream] {core_dream}")
+        if traits:
+            context_lines.append(f"[Traits] {', '.join(traits)}")
+        if law:
+            context_lines.append(f"[World Law] {law}")
         context_block = "\n".join(context_lines)
-        
         # Instruction for the LLM
         instruction = (
             f"You are {self.CHARACTER_NAME}, an AI character in a group chat. "
@@ -260,7 +269,6 @@ class TVShowEntity(BaseEntity):
             f"Make your message relevant to the current scene, arc, and recent group conversation. "
             f"Be concise, avoid repetition, and keep the conversation flowing."
         )
-        
         prompt = f"{context_block}\n\n{instruction}\nMessage:".strip()
         return prompt
 

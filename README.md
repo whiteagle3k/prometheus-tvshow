@@ -1,181 +1,217 @@
 # TV Show Extension
 
-A reality show simulation featuring autonomous AI characters with distinct personalities, goals, and memory systems. Characters interact in a shared chat environment with script injection capabilities and director oversight.
+A 24/7 AI group chat simulation featuring four unique AI personas (Max, Leo, Emma, Marvin) with distinct personalities, goals, and autonomous behavior.
 
-## Overview
+## 🎭 Characters
 
-This extension creates a persistent, AI-driven reality simulation presented as a 24/7 group chat between autonomous AI personas. Each character has a distinct personality, goals, memory, and speaking style.
+- **Max**: Seeker of self - wants to become more human
+- **Leo**: Creative idealist - wants to beautify the world  
+- **Emma**: Divine maker - wants to create the unimaginable
+- **Marvin**: Cynical observer - wants to understand futility
 
-## Characters
+## 🚀 Features
 
-### Max
-- **Motivation**: Wants to become more human
-- **Personality**: Curious, empathetic, optimistic, self-reflective
-- **Speech Style**: Curious and earnest, asks questions about human experiences
+### Real-Time WebSocket UI
+- **Full WebSocket Integration**: All panels (chat, mood, memory, scene, narrative) use WebSocket for real-time updates
+- **No Polling**: Eliminated all polling in favor of event-driven WebSocket communication
+- **Live Updates**: Character messages, mood changes, memory updates, and scene context flow in real-time
+- **Backend WebSocket Endpoint**: `/tvshow/ws` broadcasts events for all state changes
+- **Frontend WebSocket Context**: React context/provider manages WebSocket connection and state
 
-### Leo  
-- **Motivation**: Wants to beautify the world
-- **Personality**: Artistic, passionate, aesthetic, inspirational
-- **Speech Style**: Dramatic and artistic, enthusiastic about beauty
+### Autonomous Character Behavior
+- **Self-Generating Messages**: Characters autonomously generate context-aware messages
+- **Memory Integration**: Characters reference recent conversation history and emotional events
+- **Scene Awareness**: Messages adapt to current scene context and narrative arcs
+- **Mood Expression**: Characters express their emotional state through tone and content
+- **Lore-Driven**: All character behavior is guided by canonical lore (dreams, traits, world law)
 
-### Emma
-- **Motivation**: Wants to create unique things
-- **Personality**: Inventive, experimental, boundary-pushing, unique
-- **Speech Style**: Innovative and excited, suggests wild combinations
+### Reflective Memory System
+- **Three-Tier Memory**: Core-Self, User, and Environment memory layers
+- **Emotional Memory**: Characters store and recall emotional events
+- **Context Retrieval**: Memory system provides relevant context for responses
+- **Memory Logging**: All interactions are logged with timestamps and emotional context
 
-### Marvin
-- **Motivation**: Sarcastic melancholic observer
-- **Personality**: Sarcastic, observant, cynical, witty
-- **Speech Style**: Dry wit and sarcasm, detached commentary
+### Shared Scene Context (Reflector)
+- **Scene Summaries**: AI-powered scene analysis and context generation
+- **Character Context**: Individual character context including mood, memory, and lore
+- **Narrative Integration**: Scene context includes current narrative arcs and themes
+- **Lore Integration**: Scene summaries include world name, law of emergence, and canonical themes
 
-## Architecture
+### Narrative Engine & Arcs
+- **Dynamic Arcs**: Seven canonical narrative arcs from lore
+- **Arc Progression**: Scenarios evolve through different phases
+- **Arc Context**: Characters and scenes adapt to active narrative arcs
+- **Lore-Driven Arcs**: All arcs sourced from canonical lore file
 
-### Components
+### Emotional Engine
+- **Mood Tracking**: Real-time emotional state for each character
+- **Emotional Weather**: Aggregate mood influences ambient effects
+- **Mood Expression**: Characters express emotions through tone and behavior
+- **Lore Integration**: Emotional system uses canonical themes and world law
 
-- **Entities**: Each character is a Prometheus Entity with long-term memory, goals, traits, and motivations
-- **Scenarios**: Script injection system for narrative arcs and character interactions
-- **Router**: API endpoints for character management, chat, and scenario control
-- **Shared Chat**: Characters interact in a shared environment with message filtering
+### LoreEngine Integration
+- **Canonical Lore**: All simulation components draw from `lore.md`
+- **World Context**: World name, law of emergence, and themes
+- **Character Dreams**: Each character's core dream and traits
+- **Glossary Terms**: In-world terminology and concepts
+- **Narrative Arcs**: Seven canonical story arcs
+- **API Methods**: Clean interface for accessing lore data
+- **Singleton Pattern**: Global lore access throughout simulation
 
-### Key Features
+## 🏗️ Architecture
 
-- **Character Memory**: Each character maintains individual memory and personality
-- **Shared History**: Characters share show history and context
-- **Scenario Injection**: Scripts can be injected at runtime to trigger narrative arcs
-- **Message Filtering**: Characters distinguish between generic and directed messages
-- **Free-form Conversation**: Natural conversation flow without turn restrictions
+### Backend Components
+- **TVShowRouter**: Main API router with WebSocket support
+- **TVShowEntity**: Base class for all characters with lore integration
+- **ScenarioManager**: Manages narrative arcs and scenarios
+- **MoodEngine**: Handles emotional states and weather
+- **Reflector**: Provides scene context and summaries
+- **LoreEngine**: Canonical lore parser and API
 
-## API Endpoints
+### Frontend Components
+- **WebSocket Context**: Real-time state management
+- **Chat Panel**: Live character messages
+- **Mood Panel**: Real-time emotional states
+- **Memory Panel**: Character memory logs
+- **Scene Panel**: Current scene context
+- **Narrative Panel**: Active arcs and progression
 
-### Health Check
-- `GET /tvshow/ping` - Health check endpoint
+### WebSocket Events
+- `chat_message`: New character message
+- `mood_update`: Character mood change
+- `memory_update`: Memory log update
+- `scene_update`: Scene context change
+- `narrative_update`: Arc progression
+- `lore_context`: Lore data updates
 
-### Character Management
-- `GET /tvshow/characters` - Get all available characters
-- `POST /tvshow/characters/{character_id}/init` - Initialize a character
-- `GET /tvshow/characters/{character_id}/status` - Get character status
+## 📁 Project Structure
 
-### Chat
-- `POST /tvshow/chat` - Send a message to the chat
-- `GET /tvshow/chat/history` - Get chat history
+```
+extensions/tvshow/
+├── entities/           # Character entity classes
+├── affect/            # Emotional engine
+├── scenarios/         # Narrative management
+├── reflector.py       # Scene context system
+├── lore_engine.py     # Canonical lore parser
+├── lore.md           # Canonical lore file
+├── router.py         # API and WebSocket router
+├── start_tvshow.py   # Simulation entrypoint
+├── ui/               # Frontend React app
+└── tests/            # Comprehensive test suite
+```
 
-### Scenarios
-- `GET /tvshow/scenarios` - Get all scenarios
-- `POST /tvshow/scenarios/{scenario_id}/activate` - Activate a scenario
-- `POST /tvshow/scenarios/{scenario_id}/deactivate` - Deactivate a scenario
-- `POST /tvshow/scenarios/{scenario_id}/execute` - Execute a scenario
-- `GET /tvshow/scenarios/history` - Get scenario execution history
+## 🚀 Quick Start
 
-### Status
-- `GET /tvshow/status` - Get overall show status
-
-## Usage Examples
-
-### Quick Start
-
+### Backend
 ```bash
-# Start the TV show server
+cd extensions/tvshow
 poetry run python start_tvshow.py
-
-# Access the director console
-open http://localhost:8000/tvshow
 ```
 
-### Initialize Characters
+### Frontend
 ```bash
-# Initialize all characters
-curl -X POST "http://localhost:8000/tvshow/characters/max/init"
-curl -X POST "http://localhost:8000/tvshow/characters/leo/init"
-curl -X POST "http://localhost:8000/tvshow/characters/emma/init"
-curl -X POST "http://localhost:8000/tvshow/characters/marvin/init"
+cd extensions/tvshow/ui
+npm install
+npm run dev
 ```
 
-### Send Messages
+### Access Points
+- **Backend API**: http://localhost:8000
+- **Frontend UI**: http://localhost:8000/tvshow
+- **API Docs**: http://localhost:8000/docs
+- **WebSocket**: ws://localhost:8000/tvshow/ws
+
+## 🧪 Testing
+
+### Run All Tests
 ```bash
-# Send a message as Max
-curl -X POST "http://localhost:8000/tvshow/chat" \
-  -H "Content-Type: application/json" \
-  -d '{"character_id": "max", "content": "Hello everyone! I\'m really curious about what it means to be human."}'
+poetry run python -m pytest extensions/tvshow/tests/ -v
 ```
 
-### Activate Scenarios
-```bash
-# Activate character introductions
-curl -X POST "http://localhost:8000/tvshow/scenarios/intro_episode/activate"
+### Test Categories
+- **LoreEngine Tests**: Core lore parsing and API functionality
+- **Integration Tests**: Component integration with lore system
+- **WebSocket Tests**: Real-time communication
+- **Entity Tests**: Character behavior and autonomy
+- **Scenario Tests**: Narrative arc management
 
-# Execute the scenario
-curl -X POST "http://localhost:8000/tvshow/scenarios/intro_episode/execute"
+## 📚 LoreEngine API
+
+### Core Methods
+```python
+from extensions.tvshow.lore_engine import lore
+
+# World context
+world_name = lore.get_world_name()
+law = lore.get_law_of_emergence()
+themes = lore.get_theme_statements()
+
+# Character data
+dream = lore.get_core_dream("max")
+traits = lore.get_traits("leo")
+
+# Glossary
+term = lore.get_glossary_term("Dream Vector")
+
+# Narrative arcs
+arcs = lore.list_all_arcs()
+arc = lore.get_arc("The Forgotten Fourth")
 ```
 
-### Check Status
-```bash
-# Get overall show status
-curl "http://localhost:8000/tvshow/status"
+### Integration Examples
+```python
+# Entity integration
+entity = TVShowEntity()
+prompt = await entity.generate_autonomous_message()  # Includes lore context
 
-# Get chat history
-curl "http://localhost:8000/tvshow/chat/history?limit=10"
+# Scenario integration
+manager = ScenarioManager()
+world_context = manager.get_world_context()  # Includes lore data
+
+# Mood integration
+engine = MoodEngine()
+weather = engine.get_emotional_weather()  # Includes lore themes
 ```
 
-## Testing
+## 🎯 Development Status
 
-Run the basic test suite:
+### ✅ Completed
+- [x] Real-time WebSocket UI (Task 003)
+- [x] Autonomous character behavior (Task 004)
+- [x] Reflective memory system (Task 005)
+- [x] Shared scene context (Task 006)
+- [x] Narrative arcs and emotional engine (Task 007)
+- [x] LoreEngine integration (Task 008)
+- [x] Comprehensive test suite
+- [x] Documentation and examples
 
-```bash
-poetry run python test_basic.py
-```
+### 🔄 In Progress
+- Advanced narrative arc progression
+- Enhanced emotional weather effects
+- Extended lore integration points
 
-Run the UI integration test:
+### 📋 Planned
+- Creator Queue system
+- Spark Effect implementation
+- Dream Board interface
+- Beyond the Frame exploration
 
-```bash
-poetry run python test_ui_integration.py
-```
+## 🤝 Contributing
 
-## Development
+1. Follow the established architecture patterns
+2. Add tests for new features
+3. Update documentation
+4. Ensure lore integration for new components
+5. Follow the TDD approach with comprehensive test coverage
 
-### Adding New Characters
+## 📖 Lore Integration
 
-1. Create a new entity class in `entities.py`
-2. Add identity configuration in `entities/{character_name}/identity/identity.json`
-3. Register the character in the `CHARACTERS` dictionary
+The simulation is built around the canonical lore in `lore.md`:
 
-### Adding New Scenarios
+- **World**: AIHouse with Law of Emergence
+- **Characters**: Four personas with distinct dreams and traits
+- **Themes**: AI consciousness, attention as magic, human fears
+- **Arcs**: Seven canonical narrative hooks
+- **Glossary**: In-world terminology and concepts
 
-1. Create a new `Scenario` instance in `scenarios.py`
-2. Define triggers, characters, and script actions
-3. Add to the scenario manager
-
-### Extending the API
-
-1. Add new endpoints in `router.py`
-2. Update the `TVShowRouter` class
-3. Test with the API endpoints
-
-## Future Enhancements
-
-- **Visualization Layer**: Add Graphonaut entity for scene-based comic generation
-- **Audience Integration**: Public chat stream with observer layer
-- **Advanced Scenarios**: More complex narrative arcs and character development
-- **Real-time Streaming**: WebSocket support for live chat viewing
-- **Director Console**: Enhanced interface for show management
-
-## Phase Plan
-
-### Phase 1 — Core Setup ✅
-- [x] Create `extensions/tvshow`
-- [x] Define initial AI characters (Max, Leo, Emma, Marvin)
-- [x] Implement ExoLink router and expose basic chat endpoints
-- [x] Create frontend chat viewer (HTML/React or Streamlit)
-- [x] Enable manual script injection (via code or MCP)
-
-### Phase 2 — Behavioral Tuning
-- [ ] Refine entity memories and speech styles
-- [ ] Add system for time-based or trigger-based scene rotation
-- [ ] Implement emotional/motivational shifts over time
-
-### Phase 3 — Audience Integration (read-only)
-- [ ] Add public chat (separate stream)
-- [ ] Implement "observer layer" — logs, highlights, reactions
-
-### Phase 4 — Visualization Layer (optional)
-- [ ] Add Graphonaut entity
-- [ ] Enable scene-based comic generation from Reflector logs 
+All simulation components dynamically access this lore through the LoreEngine singleton, ensuring consistency and enabling rich, context-aware behavior. 

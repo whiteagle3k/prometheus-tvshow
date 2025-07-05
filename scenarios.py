@@ -11,6 +11,7 @@ from datetime import datetime
 import json
 
 from .narrative_engine import NarrativeArc, ArcPhase, create_sample_arcs
+from extensions.tvshow.lore_engine import lore
 
 
 class Scenario:
@@ -111,9 +112,22 @@ class ScenarioManager:
         """Get all scenarios."""
         return list(self.scenarios.values())
     
-    def get_all_narrative_arcs(self) -> List[NarrativeArc]:
-        """Get all narrative arcs."""
-        return list(self.narrative_arcs.values())
+    def get_all_narrative_arcs(self) -> list:
+        # Use lore for canonical arcs
+        arcs = lore.list_all_arcs()
+        # Optionally merge with dynamic arcs
+        return arcs
+    
+    def get_arc_info(self, title: str):
+        # Use lore for arc info
+        return lore.get_arc(title)
+    
+    def get_world_context(self):
+        return {
+            'world_name': lore.get_world_name(),
+            'law_of_emergence': lore.get_law_of_emergence(),
+            'themes': lore.get_theme_statements()
+        }
     
     def get_active_scenarios(self) -> List[Scenario]:
         """Get currently active scenarios."""

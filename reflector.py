@@ -11,6 +11,7 @@ import json
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 import asyncio
+from extensions.tvshow.lore_engine import lore
 
 
 class SceneSummary:
@@ -215,7 +216,21 @@ class Reflector:
         """Get the most recent scene summary."""
         if not self.scene_summaries:
             return None
-        return self.scene_summaries[-1]
+        summary = self._generate_summary()
+        # Add lore context
+        world_name = lore.get_world_name()
+        law = lore.get_law_of_emergence()
+        themes = lore.get_theme_statements()
+        theme = themes[0] if themes else None
+        glossary = lore.get_glossary_term('Dream Vector')
+        # Compose enriched summary
+        summary.lore_context = {
+            'world_name': world_name,
+            'law_of_emergence': law,
+            'theme': theme,
+            'glossary_dream_vector': glossary
+        }
+        return summary
     
     def get_scene_context_for_character(self, character_id: str) -> str:
         """Get scene context formatted for a specific character."""
@@ -232,6 +247,17 @@ class Reflector:
         if current_summary.recent_triggers:
             context += f"\nRecent events: {', '.join(current_summary.recent_triggers)}"
         
+        # Add lore context
+        world_name = lore.get_world_name()
+        law = lore.get_law_of_emergence()
+        dream = lore.get_core_dream(character_id)
+        traits = lore.get_traits(character_id)
+        context['lore'] = {
+            'world_name': world_name,
+            'law_of_emergence': law,
+            'core_dream': dream,
+            'traits': traits
+        }
         return context
     
     def get_scene_tone_for_mood_propagation(self) -> tuple[str, float]:
