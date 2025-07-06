@@ -68,12 +68,20 @@ class TVShowRouter:
         from core.exolink.router import router
         from core.exolink.models import TargetType
         def make_character_handler(character):
-            async def handler(exchange):
+            def handler(exchange):
                 import asyncio
-                if asyncio.iscoroutinefunction(character.think):
-                    return await character.think(exchange.content)
-                else:
-                    return character.think(exchange.content)
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        future = asyncio.run_coroutine_threadsafe(
+                            character.think(exchange.content), loop
+                        )
+                        return future.result(timeout=30)
+                    else:
+                        return asyncio.run(character.think(exchange.content))
+                except Exception as e:
+                    print(f"[DEBUG] Character handler error: {e}")
+                    return None
             return handler
         for character_id, character in self.characters.items():
             router.register_target(TargetType.ENTITY, character_id, make_character_handler(character))
@@ -711,13 +719,20 @@ class TVShowRouter:
         from core.exolink.router import router
         from core.exolink.models import TargetType
         def make_character_handler(character):
-            async def handler(exchange):
-                # ExoLink expects a sync handler, so wrap in ensure_future if needed
+            def handler(exchange):
                 import asyncio
-                if asyncio.iscoroutinefunction(character.think):
-                    return await character.think(exchange.content)
-                else:
-                    return character.think(exchange.content)
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        future = asyncio.run_coroutine_threadsafe(
+                            character.think(exchange.content), loop
+                        )
+                        return future.result(timeout=30)
+                    else:
+                        return asyncio.run(character.think(exchange.content))
+                except Exception as e:
+                    print(f"[DEBUG] Character handler error: {e}")
+                    return None
             return handler
         for character_id, character in get_all_characters().items():
             register_entity_class(character_id, character)

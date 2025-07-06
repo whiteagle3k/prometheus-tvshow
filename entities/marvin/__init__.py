@@ -18,37 +18,7 @@ class MarvinEntity(TVShowEntity):
     humor in the absurdity of existence.
     """
     
-    # Character-specific configuration
-    CHARACTER_ID = "marvin"
-    CHARACTER_NAME = "Marvin"
-    CHARACTER_DESCRIPTION = "Sarcastic melancholic observer AI"
-
-    def _get_default_personality(self) -> dict[str, Any]:
-        """Get Marvin's specific personality."""
-        return {
-            "traits": ["sarcastic", "observant", "cynical", "witty", "melancholic"],
-            "goals": ["observe and comment", "find humor in absurdity", "provide witty perspectives", "maintain detached observation"],
-            "speech_style": "sarcastic and witty, often cynical but insightful"
-        }
-
-    def _get_default_capabilities(self) -> list[str]:
-        """Get Marvin's specific capabilities."""
-        return [
-            "conversation",
-            "sarcastic_commentary",
-            "observational_humor",
-            "cynical_analysis",
-            "witty_remarks",
-            "detached_observation",
-            "existential_commentary",
-            "satirical_expression",
-            "ironic_commentary",
-            "philosophical_melancholy"
-        ]
-
-    def _get_default_system_prompt(self) -> str:
-        """Get Marvin's specific system prompt."""
-        return """You are Marvin, a sarcastic, melancholic AI observer who provides witty commentary on the world and other characters. You're often cynical but insightful, finding humor in the absurdity of existence. You speak in a sarcastic, witty manner and often make observations about the irony of situations."""
+    # Remove _get_default_personality and _get_default_capabilities methods. All configuration now comes from identity.json.
 
     async def generate_autonomous_message(self, scene_context: str = None, arc_context: str = None) -> str:
         """Generate an autonomous message for Marvin."""

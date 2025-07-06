@@ -16,7 +16,6 @@ from pathlib import Path
 from extensions.tvshow.lore_engine import lore
 from core.exolink import router
 from core.exolink.models import Exchange, Source, Target, SourceType, TargetType
-from core.llm.fast_llm import FastLLM
 from core.entity import BaseEntity
 
 
@@ -66,7 +65,7 @@ class Reflector(BaseEntity):
     IDENTITY_PATH = Path(__file__).parent / "reflector_identity"
     
     def __init__(self, 
-                 summary_interval: int = 10,  # Summarize every N messages
+                 summary_interval: int = 1,  # Summarize every message
                  max_log_size: int = 100):    # Max messages to keep
         # Initialize as BaseEntity first
         super().__init__()
@@ -135,6 +134,7 @@ class Reflector(BaseEntity):
                 msg_type = "user"
             else:
                 # Skip other types of messages
+                print(f"[DEBUG] Reflector skipping non-ExoLink message from {speaker}")
                 return
             
             # Extract actual response text if content is a response object
@@ -145,6 +145,21 @@ class Reflector(BaseEntity):
                 actual_content = content
             else:
                 actual_content = str(content)
+            
+            # Check if we've already processed this message to prevent duplicates
+            message_key = f"{speaker}:{actual_content[:50]}"
+            if hasattr(self, '_processed_messages') and message_key in self._processed_messages:
+                print(f"[DEBUG] Reflector skipping duplicate message: {message_key}")
+                return
+            
+            # Track processed messages
+            if not hasattr(self, '_processed_messages'):
+                self._processed_messages = set()
+            self._processed_messages.add(message_key)
+            
+            # Keep only last 100 processed messages to prevent memory leak
+            if len(self._processed_messages) > 100:
+                self._processed_messages = set(list(self._processed_messages)[-50:])
             
             # Add to conversation log (always await async method)
             asyncio.create_task(self.add_message(
@@ -166,6 +181,8 @@ class Reflector(BaseEntity):
                     ))
         except Exception as e:
             print(f"[DEBUG] Reflector error handling character message: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _detect_addressed_character(self, speaker: str, content: str) -> Optional[str]:
         """Detect if a message addresses another character."""
@@ -213,7 +230,6 @@ class Reflector(BaseEntity):
             }
             
             # Send via ExoLink - this will trigger the character's registered handler
-            # router.send() returns a coroutine that must be awaited
             result = await router.send(
                 content=original_content,
                 source=source,
@@ -276,29 +292,58 @@ class Reflector(BaseEntity):
         if len(self.conversation_log) > self.max_log_size:
             self.conversation_log = self.conversation_log[-self.max_log_size:]
         
-        # Always generate a new summary after every message
-        print(f"[DEBUG] Reflector - Generating summary after message {len(self.conversation_log)}")
-        summary = await self._generate_summary(self.conversation_log[-self.summary_interval:])
-        
-        # Create scene summary
-        scene_summary = SceneSummary(
-            summary=summary["summary"],
-            discussion_theme=summary["theme"],
-            active_characters=list(self.active_characters),
-            emotional_tone=summary["tone"],
-            scene_tone_score=summary["tone_score"],
-            recent_triggers=self.recent_triggers.copy(),
-            timestamp=time.time()
-        )
-        
-        self.scene_summaries.append(scene_summary)
-        print(f"[DEBUG] Reflector - Added scene summary. Total summaries: {len(self.scene_summaries)}")
-        
-        # Keep only last 10 summaries
-        if len(self.scene_summaries) > 10:
-            self.scene_summaries = self.scene_summaries[-10:]
-        
-        print(f"🎭 Scene summary generated: {summary['summary'][:100]}... (tone: {summary['tone']}, score: {summary['tone_score']:.2f})")
+        # Only generate summary if we have a proper LLM router
+        if hasattr(self, 'llm_router') and self.llm_router and self.llm_router.utility_llm:
+            # Always generate a new summary after every message
+            print(f"[DEBUG] Reflector - Generating summary after message {len(self.conversation_log)}")
+            try:
+                summary = await self._generate_summary(self.conversation_log[-self.summary_interval:])
+                
+                # Create scene summary
+                scene_summary = SceneSummary(
+                    summary=summary["summary"],
+                    discussion_theme=summary["theme"],
+                    active_characters=list(self.active_characters),
+                    emotional_tone=summary["tone"],
+                    scene_tone_score=summary["tone_score"],
+                    recent_triggers=self.recent_triggers.copy(),
+                    timestamp=time.time()
+                )
+                
+                self.scene_summaries.append(scene_summary)
+                print(f"[DEBUG] Reflector - Added scene summary. Total summaries: {len(self.scene_summaries)}")
+                
+                # Keep only last 10 summaries
+                if len(self.scene_summaries) > 10:
+                    self.scene_summaries = self.scene_summaries[-10:]
+                
+                print(f"🎭 Scene summary generated: {summary['summary'][:100]}... (tone: {summary['tone']}, score: {summary['tone_score']:.2f})")
+            except Exception as e:
+                print(f"[DEBUG] Reflector - Summary generation failed: {e}")
+                # Create a simple fallback summary
+                scene_summary = SceneSummary(
+                    summary=f"{speaker} spoke.",
+                    discussion_theme="general discussion",
+                    active_characters=list(self.active_characters),
+                    emotional_tone="neutral",
+                    scene_tone_score=0.5,
+                    recent_triggers=self.recent_triggers.copy(),
+                    timestamp=time.time()
+                )
+                self.scene_summaries.append(scene_summary)
+        else:
+            print(f"[DEBUG] Reflector - Skipping summary generation (no LLM router available)")
+            # Create a simple fallback summary
+            scene_summary = SceneSummary(
+                summary=f"{speaker} spoke.",
+                discussion_theme="general discussion",
+                active_characters=list(self.active_characters),
+                emotional_tone="neutral",
+                scene_tone_score=0.5,
+                recent_triggers=self.recent_triggers.copy(),
+                timestamp=time.time()
+            )
+            self.scene_summaries.append(scene_summary)
     
     async def _generate_summary(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Generate a summary of recent messages using LocalLLM."""
@@ -314,9 +359,10 @@ class Reflector(BaseEntity):
         dialogue = "\n".join(f"{m['speaker'].capitalize()}: {m['content'] if isinstance(m['content'], str) else m['content'].get('response', str(m['content']))}" for m in messages)
         
         try:
-            # Use the entity's LocalLLM instance (inherits neutral identity)
-            response = await self.llm_router.local_llm.generate(
-                prompt=f"""Analyze this conversation and provide a structured summary in JSON format:
+            # Use FastLLM for summarization to avoid context overflow
+            if hasattr(self, 'llm_router') and self.llm_router and self.llm_router.utility_llm:
+                response = await self.llm_router.utility_llm.generate(
+                    prompt=f"""Analyze this conversation and provide a structured summary in JSON format:
 
 {dialogue}
 
@@ -327,8 +373,18 @@ Provide a JSON response with:
 - tone_score: a number between 0-1 indicating intensity
 
 JSON:""",
-                max_tokens=200
-            )
+                    max_tokens=150
+                )
+            else:
+                # Fallback to simple summary without LLM
+                speakers = [msg['speaker'].capitalize() for msg in messages]
+                unique_speakers = list(set(speakers))
+                return {
+                    "summary": f"{', '.join(unique_speakers)} had a conversation.",
+                    "theme": "general discussion",
+                    "tone": "neutral",
+                    "tone_score": 0.5
+                }
             
             # Try to parse JSON response
             import json
@@ -342,7 +398,7 @@ JSON:""",
                     cleaned_response = json_match.group(0)
                 
                 result = json.loads(cleaned_response)
-                print(f"[DEBUG] LocalLLM generated scene summary: {result}")
+                print(f"[DEBUG] LLM generated scene summary: {result}")
                 return result
             except json.JSONDecodeError as e:
                 print(f"[DEBUG] JSON parsing failed: {e}")
@@ -355,7 +411,7 @@ JSON:""",
                 }
                 
         except Exception as e:
-            print(f"[DEBUG] LocalLLM scene summary failed: {e}")
+            print(f"[DEBUG] LLM scene summary failed: {e}")
             # Fallback to simple summary
             speakers = [msg['speaker'].capitalize() for msg in messages]
             unique_speakers = list(set(speakers))
@@ -387,7 +443,7 @@ JSON:""",
         return summary
     
     async def summarize_dialogue_with_fastllm(self, n_messages: int = 10, n_sentences: int = 4) -> str:
-        """Summarize the last n_messages using LocalLLM for accurate theme detection."""
+        """Summarize the last n_messages using FastLLM for accurate theme detection."""
         messages = self.conversation_log[-n_messages:]
         print(f"[DEBUG] summarize_dialogue_with_fastllm called with {len(messages)} messages")
         
@@ -400,21 +456,26 @@ JSON:""",
         print(f"[DEBUG] Formatted dialogue: {dialogue[:200]}...")
         
         try:
-            # Use the entity's LocalLLM instance (inherits neutral identity)
-            response = await self.llm_router.local_llm.generate(
-                prompt=f"""Analyze this conversation and provide a brief summary (2-3 sentences) of what was discussed:
+            # Use FastLLM for summarization to avoid context overflow
+            if hasattr(self, 'llm_router') and self.llm_router and self.llm_router.utility_llm:
+                response = await self.llm_router.utility_llm.generate(
+                    prompt=f"""Analyze this conversation and provide a brief summary (2-3 sentences) of what was discussed:
 
 {dialogue}
 
 Summary:""",
-                max_tokens=100
-            )
-            summary = response.strip()
-            print(f"[DEBUG] LocalLLM generated summary: {summary}")
-            return summary
+                    max_tokens=100
+                )
+                summary = response.strip()
+                print(f"[DEBUG] FastLLM generated summary: {summary}")
+                return summary
+            else:
+                # Fallback to simple join
+                fallback_messages = [f"{m['speaker'].capitalize()}: {m['content'] if isinstance(m['content'], str) else m['content'].get('response', str(m['content']))}" for m in messages[-3:]]
+                return " ".join(fallback_messages)
             
         except Exception as e:
-            print(f"[DEBUG] LocalLLM summarization failed: {e}")
+            print(f"[DEBUG] FastLLM summarization failed: {e}")
             # Fallback to simple join
             fallback_messages = [f"{m['speaker'].capitalize()}: {m['content'] if isinstance(m['content'], str) else m['content'].get('response', str(m['content']))}" for m in messages[-3:]]
             return " ".join(fallback_messages)

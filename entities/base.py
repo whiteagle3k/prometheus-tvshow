@@ -25,11 +25,6 @@ class TVShowEntity(BaseEntity):
     Subclasses should only override character-specific behavior.
     """
     
-    # Subclasses must define these
-    CHARACTER_ID: str = None
-    CHARACTER_NAME: str = None
-    CHARACTER_DESCRIPTION: str = None
-    
     # Memory and logging configuration
     MEMORY_LOG_MAXLEN = 20
     
@@ -45,7 +40,9 @@ class TVShowEntity(BaseEntity):
         self.mood_engine = MoodEngine()
         self.user_profile = {}  # Store extracted user facts (e.g., name)
         
-        print(f"🎭 {self.CHARACTER_NAME} initialized - TV Show character")
+        # Get character name from identity config for logging
+        character_name = self.identity_config.get("name", self.__class__.__name__)
+        print(f"🎭 {character_name} initialized - TV Show character")
 
     def _load_identity(self) -> dict[str, Any]:
         """Load character's identity configuration with fallback to defaults."""
@@ -55,26 +52,48 @@ class TVShowEntity(BaseEntity):
             if identity_file.exists():
                 with open(identity_file, 'r', encoding='utf-8') as f:
                     config = json.load(f)
-                print(f"✅ Loaded identity for {self.CHARACTER_NAME}")
+                print(f"✅ Loaded identity for {config.get('name', 'Unknown')}")
                 return config
             else:
                 print(f"⚠️ Identity file not found: {identity_file}")
                 return self._get_default_identity()
                 
         except Exception as e:
-            print(f"⚠️ Error loading {self.CHARACTER_NAME}'s identity: {e}")
+            print(f"⚠️ Error loading identity: {e}")
             return self._get_default_identity()
 
     def _get_identity_path(self) -> Path:
         """Get the path to this character's identity file."""
-        return Path(__file__).parent / self.CHARACTER_ID / "identity" / "identity.json"
+        character_id = self._get_character_id()
+        return Path(__file__).parent / character_id / "identity" / "identity.json"
+
+    def _get_character_id(self) -> str:
+        """Get character ID from class name or module path."""
+        # Try to get from class name (e.g., MaxEntity -> max)
+        class_name = self.__class__.__name__
+        if class_name.endswith('Entity'):
+            character_id = class_name[:-6].lower()  # Remove 'Entity' suffix
+            return character_id
+        
+        # Fallback: try to get from module path
+        module_path = self.__class__.__module__
+        if 'entities.' in module_path:
+            # Extract character name from module path
+            parts = module_path.split('.')
+            for part in parts:
+                if part in ['max', 'leo', 'emma', 'marvin']:
+                    return part
+        
+        # Final fallback
+        return "unknown"
 
     def _get_default_identity(self) -> dict[str, Any]:
         """Get default identity for this character."""
+        character_id = self._get_character_id()
         return {
-            "id": self.CHARACTER_ID,
-            "name": self.CHARACTER_NAME,
-            "description": self.CHARACTER_DESCRIPTION,
+            "id": character_id,
+            "name": character_id.capitalize(),
+            "description": f"AI character {character_id.capitalize()}",
             "personality": self._get_default_personality(),
             "llm_config": self._get_default_llm_config(),
             "capabilities": self._get_default_capabilities(),
@@ -113,7 +132,8 @@ class TVShowEntity(BaseEntity):
 
     def _get_default_system_prompt(self) -> str:
         """Get default system prompt for this character. Override in subclasses."""
-        return f"You are {self.CHARACTER_NAME}, {self.CHARACTER_DESCRIPTION}."
+        character_name = self._get_character_id().capitalize()
+        return f"You are {character_name}, an AI character."
 
     def _is_lightweight_entity(self) -> bool:
         """TV Show characters always run in full AI mode."""
@@ -139,7 +159,8 @@ class TVShowEntity(BaseEntity):
     def _memory_reference_phrase(self) -> str | None:
         """Generate a phrase referencing recent memory."""
         # Reference a recent message from another character if available
-        others = [entry for entry in self.memory_log if entry['speaker'] != self.CHARACTER_ID and entry['speaker'] != 'user']
+        character_id = self.identity_config.get("id", self._get_character_id())
+        others = [entry for entry in self.memory_log if entry['speaker'] != character_id and entry['speaker'] != 'user']
         if not others:
             return None
         ref = random.choice(others)
@@ -250,25 +271,24 @@ class TVShowEntity(BaseEntity):
                 break
 
     async def build_contextual_prompt(self, user_message: str = None, scene_context: str = None, arc_context: str = None) -> str:
-        """Build a context-rich prompt for the LLM, including memory, mood, scenario, and lore."""
+        """Build a context-rich prompt for the LLM, including memory, mood, scenario, and lore. Returns only the context block, not the full prompt."""
         # Retrieve shared scene context from the Reflector (now async)
         shared_scene_context = None
-        if hasattr(self, 'CHARACTER_ID') and self.CHARACTER_ID:
-            try:
-                shared_scene_context = await reflector.get_scene_context_for_character(self.CHARACTER_ID)
-                print(f"[DEBUG] {self.CHARACTER_NAME} - Retrieved shared scene context: {shared_scene_context}")
-            except Exception as e:
-                print(f"[DEBUG] Could not get shared scene context: {e}")
-        else:
-            print(f"[DEBUG] {self.CHARACTER_NAME} - No CHARACTER_ID available")
+        character_id = self.identity_config.get("id", self._get_character_id())
+        try:
+            shared_scene_context = await reflector.get_scene_context_for_character(character_id)
+            character_name = self.identity_config.get("name", character_id)
+            print(f"[DEBUG] {character_name} - Retrieved shared scene context: {shared_scene_context}")
+        except Exception as e:
+            print(f"[DEBUG] Could not get shared scene context: {e}")
         
         memory_ref = self._memory_reference_phrase()
         scene_phrase = self._scene_aware_phrase(scene_context, arc_context)
         mood_phrase = self._mood_aware_phrase()
         mood = self.get_mood()
         # Lore context
-        core_dream = lore.get_core_dream(self.CHARACTER_ID)
-        traits = lore.get_traits(self.CHARACTER_ID)
+        core_dream = lore.get_core_dream(character_id)
+        traits = lore.get_traits(character_id)
         law = lore.get_law_of_emergence()
         # Build context block
         context_lines = []
@@ -295,43 +315,40 @@ class TVShowEntity(BaseEntity):
             context_lines.append(f"[Traits] {', '.join(traits)}")
         if law:
             context_lines.append(f"[World Law] {law}")
-        if user_message:
-            context_lines.append(f"[User message] {user_message}")
+        # DO NOT include user_message in context block to avoid duplication
         context_block = "\n".join(context_lines)
-        # Instruction for the LLM
-        instruction = (
-            f"You are {self.CHARACTER_NAME}, an AI character in a group chat. "
-            f"Stay in character and respond naturally, referencing the above context. "
-            f"Make your message relevant to the current scene, arc, and recent group conversation. "
-            f"Be concise, avoid repetition, and keep the conversation flowing."
-        )
-        prompt = f"{context_block}\n\n{instruction}\nMessage:".strip()
-        print(f"[DEBUG] {self.CHARACTER_NAME} context-rich prompt:\n{prompt}\n{'='*40}")
-        return prompt
+        
+        character_name = self.identity_config.get("name", self._get_character_id().capitalize())
+        print(f"[DEBUG] {character_name} context block:\n{context_block}\n{'='*40}")
+        return context_block
 
     async def think(self, user_text: str, user_id: str | None = None, scene_context: str = None, arc_context: str = None) -> dict[str, Any]:
         """
         Override think to use context-rich prompt and update memory after every message.
         """
         self._extract_user_facts(user_text)
-        prompt = await self.build_contextual_prompt(user_message=user_text, scene_context=scene_context, arc_context=arc_context)
-        # Call parent's think with the context-rich prompt
-        result = await super().think(prompt, user_id=user_id)
+        context_block = await self.build_contextual_prompt(scene_context=scene_context, arc_context=arc_context)
+        # Combine context with user message (avoid duplication)
+        full_message = f"{context_block}\n\n{user_text}" if context_block else user_text
+        # Call parent's think with the context-rich message
+        result = await super().think(full_message, user_id=user_id)
         # Log user and AI messages to memory
         self.log_message(speaker="user", msg_type="user", content=user_text)
         ai_response = result.get("response", "")
-        self.log_message(speaker=self.CHARACTER_ID, msg_type="ai", content=ai_response)
+        character_id = self.identity_config.get("id", self._get_character_id())
+        self.log_message(speaker=character_id, msg_type="ai", content=ai_response)
         return result
 
     async def generate_autonomous_message(self, scene_context: str = None, arc_context: str = None) -> str:
         """
         Generate an autonomous message using the context-rich prompt and update memory.
         """
-        prompt = await self.build_contextual_prompt(scene_context=scene_context, arc_context=arc_context)
-        # Call parent's think with the context-rich prompt
-        result = await super().think(prompt)
+        context_block = await self.build_contextual_prompt(scene_context=scene_context, arc_context=arc_context)
+        # For autonomous messages, use the context as the main prompt
+        result = await super().think(context_block)
         ai_response = result.get("response", "")
-        self.log_message(speaker=self.CHARACTER_ID, msg_type="ai", content=ai_response)
+        character_id = self.identity_config.get("id", self._get_character_id())
+        self.log_message(speaker=character_id, msg_type="ai", content=ai_response)
         return ai_response
 
     async def process_query(self, query: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -344,17 +361,18 @@ class TVShowEntity(BaseEntity):
         response = await self.think(query, scene_context=scene_context, arc_context=arc_context)
         return {
             "response": response.get("response", ""),
-            "character": self.CHARACTER_ID,
+            "character": self.identity_config.get("id", self._get_character_id()),
             "query": query,
             "context": context
         }
 
     def get_character_info(self) -> dict[str, Any]:
         """Get character information for registration."""
+        character_id = self.identity_config.get("id", self._get_character_id())
         return {
-            "id": self.CHARACTER_ID,
-            "name": self.CHARACTER_NAME,
-            "description": self.CHARACTER_DESCRIPTION,
+            "id": character_id,
+            "name": self.identity_config.get("name", character_id.capitalize()),
+            "description": self.identity_config.get("description", f"AI character {character_id.capitalize()}"),
             "class": self.__class__,
-            "module_path": f"extensions.tvshow.entities.{self.CHARACTER_ID}"
+            "module_path": f"extensions.tvshow.entities.{character_id}"
         } 
