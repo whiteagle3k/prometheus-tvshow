@@ -24,7 +24,7 @@ function App() {
     <WebSocketProvider>
       <div className="container">
         <div className="header">
-          <h1>🎬 TV Show Director Console</h1>
+          <h1>🎬 AI House Director Console</h1>
           <p>Monitor and control the AI reality show simulation</p>
         </div>
         <div className="main-content">

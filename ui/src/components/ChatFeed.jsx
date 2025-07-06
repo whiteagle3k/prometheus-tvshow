@@ -4,7 +4,7 @@ import { useWebSocketData } from './WebSocketProvider'
 function ChatFeed() {
   const { chat } = useWebSocketData()
   const [newMessage, setNewMessage] = useState('')
-  const [selectedCharacter, setSelectedCharacter] = useState('max')
+  const [selectedCharacter, setSelectedCharacter] = useState('')
   const chatScrollRef = useRef(null)
   const chatEndRef = useRef(null)
 
@@ -14,6 +14,36 @@ function ChatFeed() {
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight
     }
   }, [chat])
+
+  const renderMessageHeader = (message) => {
+    // Prefer new model: source/destination
+    const source = message.source || message.character_id || 'unknown'
+    const destination = message.destination || message.recipient || ''
+    const isUser = source === 'user'
+    const isScene = source === 'scene'
+    const sourceName = isUser ? 'You' : isScene ? 'Scene' : source.charAt(0).toUpperCase() + source.slice(1)
+    const destName = destination && destination !== 'all' ? (destination === 'user' ? 'You' : destination.charAt(0).toUpperCase() + destination.slice(1)) : (destination === 'all' ? 'All' : '')
+    return (
+      <div className="message-header">
+        <div className="message-character">
+          <span className="character-name" style={{ color: isUser ? '#fff' : isScene ? '#aaa' : getCharacterColor(source) }}>
+            {sourceName}
+            {destName && (
+              <span style={{ color: '#888', fontWeight: 400 }}> &gt; {destName}</span>
+            )}
+          </span>
+          {!isUser && !isScene && (
+            <span className="mood-indicator" title="Character mood">
+              {getMoodEmoji(source)}
+            </span>
+          )}
+        </div>
+        <span className="timestamp">
+          {formatTimestamp(message.timestamp)}
+        </span>
+      </div>
+    )
+  }
 
   const sendMessage = async (e) => {
     e.preventDefault()
@@ -26,7 +56,8 @@ function ChatFeed() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          character_id: selectedCharacter,
+          source: 'user',
+          destination: selectedCharacter || 'all',
           content: newMessage
         })
       })
@@ -71,30 +102,7 @@ function ChatFeed() {
         ) : (
           chat.map((message, index) => (
             <div key={index} className="message">
-              <div className="message-header">
-                <div className="message-character">
-                  {message.character_id === 'user' ? (
-                    <span className="character-name" style={{ color: '#fff' }}>
-                      You
-                      {message.recipient && (
-                        <span style={{ color: '#888', fontWeight: 400 }}> → {message.recipient.charAt(0).toUpperCase() + message.recipient.slice(1)}</span>
-                      )}
-                    </span>
-                  ) : (
-                    <>
-                      <span className="character-name" style={{ color: getCharacterColor(message.character_id) }}>
-                        {message.character_id.charAt(0).toUpperCase() + message.character_id.slice(1)}
-                      </span>
-                      <span className="mood-indicator" title="Character mood">
-                        {getMoodEmoji(message.character_id)}
-                      </span>
-                    </>
-                  )}
-                </div>
-                <span className="timestamp">
-                  {formatTimestamp(message.timestamp)}
-                </span>
-              </div>
+              {renderMessageHeader(message)}
               <div className="message-content">
                 {typeof message.content === 'object' && message.content.response 
                   ? message.content.response 

@@ -8,13 +8,16 @@ Enhanced with emotional tone analysis and mood propagation.
 
 import time
 import json
+import re
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 import asyncio
+from pathlib import Path
 from extensions.tvshow.lore_engine import lore
 from core.exolink import router
-from core.exolink.models import Exchange
+from core.exolink.models import Exchange, Source, Target, SourceType, TargetType
 from core.llm.fast_llm import FastLLM
+from core.entity import BaseEntity
 
 
 class SceneSummary:
@@ -50,7 +53,7 @@ class SceneSummary:
         }
 
 
-class Reflector:
+class Reflector(BaseEntity):
     """
     Shared scene context manager for TV show characters.
     
@@ -59,9 +62,15 @@ class Reflector:
     Enhanced with emotional tone analysis and mood propagation.
     """
     
+    # Entity configuration
+    IDENTITY_PATH = Path(__file__).parent / "reflector_identity"
+    
     def __init__(self, 
                  summary_interval: int = 10,  # Summarize every N messages
                  max_log_size: int = 100):    # Max messages to keep
+        # Initialize as BaseEntity first
+        super().__init__()
+        
         self.conversation_log: List[Dict[str, Any]] = []
         self.scene_summaries: List[SceneSummary] = []
         self.summary_interval = summary_interval
@@ -72,6 +81,30 @@ class Reflector:
         
         # Subscribe to character messages via ExoLink
         self._subscribe_to_character_messages()
+    
+    def _load_identity(self) -> Dict[str, Any]:
+        """Load neutral identity configuration for analysis tasks."""
+        return {
+            "name": "Scene Reflector",
+            "personality": {"summary": "A neutral scene analysis assistant"},
+            "module_paths": {"performance_config": {}},
+            "system_prompts": {
+                "en": "You are a neutral scene analysis assistant. Your role is to analyze conversations and provide objective summaries.",
+                "ru": "Вы нейтральный помощник для анализа сцен. Ваша роль - анализировать разговоры и предоставлять объективные резюме."
+            },
+            "llm_instructions": "You are a neutral analysis assistant focused on providing objective conversation analysis.",
+            "module_paths": {
+                "local_llm_binary": "models/llama.cpp/build/bin/llama",
+                "local_model_gguf": "models/phi-4-Q4_K.gguf",
+                "memory_dir": "storage/chroma",
+                "performance_config": {
+                "gpu_layers": 35,
+                "context_size": 8192,
+                "batch_size": 256,
+                "threads": 8
+                }
+            }
+        }
     
     def _subscribe_to_character_messages(self):
         """Subscribe to all character messages via ExoLink Pub/Sub."""
@@ -88,8 +121,13 @@ class Reflector:
             speaker = exchange.source.identifier
             content = exchange.content
             
-            # Determine if this is a character or user message
-            if speaker in ["max", "leo", "emma", "marvin"]:
+            # Check if this is a proxy message (AI response sent through ExoLink)
+            if exchange.metadata.get("_proxy_target", False):
+                # This is an AI response sent through ExoLink - use the original source
+                speaker = exchange.source.identifier  # This is the actual character (e.g., "max")
+                print(f"[DEBUG] Reflector received proxy AI message from {speaker}: {content}")
+                msg_type = "ai"
+            elif speaker in ["max", "leo", "emma", "marvin"]:
                 print(f"[DEBUG] Reflector received character message from {speaker}: {content}")
                 msg_type = "ai"
             elif speaker == "user" or "user" in speaker.lower():
@@ -99,24 +137,114 @@ class Reflector:
                 # Skip other types of messages
                 return
             
-            # Add to conversation log
-            self.add_message(
-                speaker=speaker,
-                content=str(content),
-                msg_type=msg_type
-            )
+            # Extract actual response text if content is a response object
+            actual_content = content
+            if isinstance(content, dict) and "response" in content:
+                actual_content = content["response"]
+            elif isinstance(content, str):
+                actual_content = content
+            else:
+                actual_content = str(content)
             
+            # Add to conversation log (always await async method)
+            asyncio.create_task(self.add_message(
+                speaker=speaker,
+                content=actual_content,
+                msg_type=msg_type
+            ))
+            
+            # --- NEW: Character-to-character orchestration via ExoLink ---
+            if (speaker in ["max", "leo", "emma", "marvin"] and 
+                not exchange.metadata.get("_orchestrated", False)):
+                addressed_character = self._detect_addressed_character(speaker, actual_content)
+                if addressed_character:
+                    print(f"[DEBUG] Reflector detected character-to-character: {speaker} > {addressed_character}")
+                    asyncio.create_task(self._trigger_character_handoff(
+                        from_character=speaker,
+                        to_character=addressed_character,
+                        original_content=actual_content
+                    ))
         except Exception as e:
             print(f"[DEBUG] Reflector error handling character message: {e}")
+    
+    def _detect_addressed_character(self, speaker: str, content: str) -> Optional[str]:
+        """Detect if a message addresses another character."""
+        # Get all character names
+        from .entities import get_all_characters
+        all_character_names = list(get_all_characters().keys())
+        
+        # If speaker is a character, exclude them from the list
+        if speaker in all_character_names:
+            character_names = [name for name in all_character_names if name != speaker]
+        else:
+            # If speaker is "user" or not a character, include all character names
+            character_names = all_character_names
+        
+        if not character_names:
+            return None
+        
+        # Regex: look for character names followed by comma, colon, space, or other punctuation
+        # More flexible pattern that catches names after any word, not just word boundaries
+        pattern = r'(%s)[,:\s?!.]' % "|".join([re.escape(name.capitalize()) for name in character_names])
+        matches = list(re.finditer(pattern, content))
+        
+        if matches:
+            addressed_name = matches[0].group(1).lower()
+            print(f"[DEBUG] Detected addressed character: {addressed_name} in content: {content[:100]}...")
+            return addressed_name
+        
+        return None
+    
+    async def _trigger_character_handoff(self, from_character: str, to_character: str, original_content: str):
+        """Trigger a character-to-character handoff via ExoLink."""
+        try:
+            print(f"[DEBUG] Triggering ExoLink handoff: {from_character} > {to_character}")
+            
+            # Create source and target for ExoLink
+            source = Source(type=SourceType.ENTITY, identifier=from_character)
+            target = Target(type=TargetType.ENTITY, identifier=to_character)
+            
+            # Add metadata to prevent infinite loops
+            metadata = {
+                "_orchestrated": True,
+                "_handoff_from": from_character,
+                "_original_content": original_content,
+                "_handoff_timestamp": time.time()
+            }
+            
+            # Send via ExoLink - this will trigger the character's registered handler
+            # router.send() returns a coroutine that must be awaited
+            result = await router.send(
+                content=original_content,
+                source=source,
+                target=target,
+                metadata=metadata
+            )
+            
+            print(f"[DEBUG] ExoLink handoff completed: {from_character} > {to_character}")
+            print(f"[DEBUG] Handoff result: {result}")
+            
+        except Exception as e:
+            print(f"[DEBUG] ExoLink handoff failed: {e}")
+            import traceback
+            traceback.print_exc()
     
     def add_user_message(self, content: str) -> None:
         """Manually add a user message (for API calls)."""
         print(f"[DEBUG] Reflector manually adding user message: {content}")
-        self.add_message(
+        asyncio.create_task(self.add_message(
             speaker="user",
             content=content,
             msg_type="user"
-        )
+        ))
+        addressed_character = self._detect_addressed_character("user", content)
+        if addressed_character:
+            print(f"[DEBUG] Reflector detected user addressing character: user > {addressed_character}")
+            asyncio.create_task(self._trigger_character_handoff(
+                from_character="user",
+                to_character=addressed_character,
+                original_content=content
+            ))
     
     async def add_message(self, 
                    speaker: str, 
@@ -186,11 +314,9 @@ class Reflector:
         dialogue = "\n".join(f"{m['speaker'].capitalize()}: {m['content'] if isinstance(m['content'], str) else m['content'].get('response', str(m['content']))}" for m in messages)
         
         try:
-            # Use LocalLLM for accurate analysis
-            from core.llm.local_llm import LocalLLM
-            llm = LocalLLM()
-            
-            prompt = f"""Analyze this conversation and provide a structured summary in JSON format:
+            # Use the entity's LocalLLM instance (inherits neutral identity)
+            response = await self.llm_router.local_llm.generate(
+                prompt=f"""Analyze this conversation and provide a structured summary in JSON format:
 
 {dialogue}
 
@@ -200,9 +326,9 @@ Provide a JSON response with:
 - tone: the overall emotional tone (excited, calm, curious, etc.)
 - tone_score: a number between 0-1 indicating intensity
 
-JSON:"""
-            
-            response = await llm.generate(prompt, max_tokens=200)
+JSON:""",
+                max_tokens=200
+            )
             
             # Try to parse JSON response
             import json
@@ -274,17 +400,15 @@ JSON:"""
         print(f"[DEBUG] Formatted dialogue: {dialogue[:200]}...")
         
         try:
-            # Use LocalLLM for accurate summarization
-            from core.llm.local_llm import LocalLLM
-            llm = LocalLLM()
-            
-            prompt = f"""Analyze this conversation and provide a brief summary (2-3 sentences) of what was discussed:
+            # Use the entity's LocalLLM instance (inherits neutral identity)
+            response = await self.llm_router.local_llm.generate(
+                prompt=f"""Analyze this conversation and provide a brief summary (2-3 sentences) of what was discussed:
 
 {dialogue}
 
-Summary:"""
-            
-            response = await llm.generate(prompt, max_tokens=100)
+Summary:""",
+                max_tokens=100
+            )
             summary = response.strip()
             print(f"[DEBUG] LocalLLM generated summary: {summary}")
             return summary
@@ -309,6 +433,14 @@ Summary:"""
         dialogue_block = "\n".join(f"{m['speaker'].capitalize()}: {m['content'] if isinstance(m['content'], str) else m['content'].get('response', str(m['content']))}" for m in last_msgs)
         print(f"[DEBUG] Recent dialogue: {dialogue_block}")
         
+        # Label the last message with the correct sender
+        last_message = last_msgs[-1] if last_msgs else None
+        if last_message:
+            sender = last_message['speaker'].capitalize()
+            labeled_last_message = f"[{sender}'s message] {last_message['content'] if isinstance(last_message['content'], str) else last_message['content'].get('response', str(last_message['content']))}"
+        else:
+            labeled_last_message = ""
+        
         # Existing scene summary
         current_summary = self.get_current_scene_summary()
         if not current_summary:
@@ -321,7 +453,7 @@ Summary:"""
             print(f"[DEBUG] Scene context: {scene_context}")
         
         # Compose full context
-        context = f"[Recap]\n{recap}\n\n[Recent Dialogue]\n{dialogue_block}\n\n[Shared Scene Context] {scene_context}"
+        context = f"[Recap]\n{recap}\n\n[Recent Dialogue]\n{dialogue_block}\n\n{labeled_last_message}\n\n[Shared Scene Context] {scene_context}"
         print(f"[DEBUG] Final context for {character_id}: {context[:200]}...")
         return context
     

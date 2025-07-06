@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import random
+import re
 
 from .entities import get_character, get_all_characters
 from .scenarios import ScenarioManager, create_sample_scenarios
@@ -257,20 +258,95 @@ class TVShowRouter:
         @self.app.post("/tvshow/chat")
         async def send_message(message: Dict[str, Any]):
             print(f"[DEBUG] /tvshow/chat handler called with: {message}")
-            """Send a message to the chat and get AI response."""
+            # New: support source and destination
+            source = message.get("source")
+            destination = message.get("destination")
             character_id = message.get("character_id")
             content = message.get("content")
             if not content:
                 raise HTTPException(status_code=400, detail="content is required")
-            # Build context for this message
+
+            # --- NEW: Regex-based character name detection and splitting ---
+            from .entities import get_all_characters
+            character_names = list(get_all_characters().keys())
+            # Only apply splitting for user/scene messages with no explicit destination
+            if (not destination or destination == "all") and (source in [None, "user", "scene", ""]):
+                # Regex: look for e.g. "Max," or "Max:"
+                pattern = r"(?:^|[.!?]\s+)(%s)[,:\s]" % "|".join([re.escape(name.capitalize()) for name in character_names])
+                matches = list(re.finditer(pattern, content))
+                if matches:
+                    # Split at the first match
+                    match = matches[0]
+                    split_idx = match.start(1)
+                    before = content[:split_idx].strip()
+                    after = content[split_idx:].strip()
+                    # Do NOT remove the name from 'after'; keep the addressed name in the message content
+                    addressed_name = None
+                    for name in character_names:
+                        if after.lower().startswith(name + ',') or after.lower().startswith(name + ':') or after.lower().startswith(name + ' '):
+                            addressed_name = name
+                            break
+                    results = []
+                    if before:
+                        # Send general part as scene/all message
+                        results.append({
+                            "source": source or "user",
+                            "destination": "all",
+                            "content": before
+                        })
+                    if addressed_name and after:
+                        # Send addressed part as direct message, KEEPING the name in the content
+                        results.append({
+                            "source": source or "user",
+                            "destination": addressed_name,
+                            "content": after
+                        })
+                    # Recursively call send_message for each part
+                    responses = []
+                    for part in results:
+                        # Avoid infinite recursion by setting a flag
+                        part["_parsed"] = True
+                        resp = await send_message(part)
+                        responses.append(resp)
+                    return {"status": "split", "parts": responses}
+            # --- END SPLIT LOGIC ---
+
+            # --- Character-to-character detection and routing ---
+            # Only for character-originated messages, not already parsed, and not direct messages
+            if (
+                source in self.characters
+                and (not message.get('_parsed'))
+                and (not destination or destination == 'user' or destination == 'all')
+            ):
+                # Regex: look for e.g. "Marvin," or "Marvin:"
+                pattern = r"(?:^|[.!?]\s+)(%s)[,:\s]" % "|".join([re.escape(name.capitalize()) for name in character_names if name != source])
+                matches = list(re.finditer(pattern, content))
+                if matches:
+                    match = matches[0]
+                    # Route the whole message to the addressed character
+                    addressed_name = matches[0].group(1).lower()
+                    if addressed_name in character_names:
+                        print(f"[DEBUG] Character-to-character detected: {source} > {addressed_name}")
+                        part = {
+                            "source": source,
+                            "destination": addressed_name,
+                            "content": content,
+                            "_parsed": True
+                        }
+                        resp = await send_message(part)
+                        # Optionally, return both the original and the routed message
+                        return {"status": "character_to_character", "original": user_chat_entry, "routed": resp}
+            # --- END character-to-character logic ---
+
             context = self.context_builder.build_context(character_id, content)
             arc_id = context.get("arc_id")
             phase_id = context.get("phase_id")
             timestamp = asyncio.get_event_loop().time()
-            # If no character_id, treat as scene message (no agent response)
-            if not character_id:
+            # If no character_id and no destination, treat as scene message
+            if not character_id and not destination:
                 scene_chat_entry = {
-                    "character_id": "scene",
+                    "source": "scene",
+                    "destination": "all",
                     "content": content,
                     "timestamp": timestamp,
                     "arc_id": arc_id,
@@ -280,66 +356,133 @@ class TVShowRouter:
                 print(f"[DEBUG] Appending and broadcasting scene message: {scene_chat_entry}")
                 asyncio.create_task(self._broadcast_event({"type": "chat", "payload": {"message": scene_chat_entry}}))
                 await self.reflector.add_message("scene", content, "scene")
-                # Still check for arc/scenario triggers
+                # Arc/scenario triggers as before
                 triggered_arcs = self.scenario_manager.check_arc_triggers(content, "scene")
                 for arc in triggered_arcs:
                     self.scenario_manager.activate_narrative_arc(arc.arc_id)
                 triggered_scenarios = self.scenario_manager.check_triggers(content, "scene")
-                # Update arcs with context
-                scene_context = {
-                    "scene_content": content,
-                    "active_characters": ["scene"]
-                }
+                scene_context = {"scene_content": content, "active_characters": ["scene"]}
                 arc_transitions = self.scenario_manager.update_narrative_arcs(scene_context)
-                # Broadcast scene/narrative updates
                 scene_summary = self.reflector.get_current_scene_summary()
                 if scene_summary:
                     asyncio.create_task(self._broadcast_event({"type": "scene", "payload": scene_summary.to_dict()}))
                 arcs = list(self.scenario_manager.get_all_narrative_arcs())
                 asyncio.create_task(self._broadcast_event({"type": "narrative", "payload": arcs}))
                 return {"status": "success", "message": "Scene message logged", "scene_message": scene_chat_entry}
-            # Otherwise, normal agent message
+            # Otherwise, normal message (user or character)
+            # Backward compatibility: if only character_id, treat as user->character
+            if not source:
+                source = "user"
+            if not destination:
+                destination = character_id
             user_chat_entry = {
-                "character_id": "user",
+                "source": source,
+                "destination": destination,
                 "content": content,
                 "timestamp": timestamp,
                 "arc_id": arc_id,
                 "phase_id": phase_id
             }
             self.chat_history.append(user_chat_entry)
-            print(f"[DEBUG] Appending and broadcasting user message: {user_chat_entry}")
+            print(f"[DEBUG] Appending and broadcasting user/character message: {user_chat_entry}")
             asyncio.create_task(self._broadcast_event({"type": "chat", "payload": {"message": user_chat_entry}}))
-            self.characters[character_id].log_message("user", "user", content)
-            await self.reflector.add_message("user", content, "user")
-            triggered_arcs = self.scenario_manager.check_arc_triggers(content, character_id)
+            # Log to memory
+            if source == "user":
+                if destination in self.characters:
+                    self.characters[destination].log_message("user", "user", content)
+                await self.reflector.add_message("user", content, "user")
+            else:
+                if source in self.characters:
+                    self.characters[source].log_message(source, "ai", content)
+                await self.reflector.add_message(source, content, "ai")
+            triggered_arcs = self.scenario_manager.check_arc_triggers(content, destination)
             for arc in triggered_arcs:
                 self.scenario_manager.activate_narrative_arc(arc.arc_id)
-            # Route message to agent via AgentManager
-            agent_result = await self.agent_manager.route_message_to_agent(
-                character_id, content, context=context, metadata=None
-            )
-            ai_response = agent_result.get("response")
-            if isinstance(ai_response, dict) and "content" in ai_response:
-                ai_response = ai_response["content"]
-            ai_chat_entry = {
-                "character_id": character_id,
-                "content": ai_response,
-                "timestamp": asyncio.get_event_loop().time(),
-                "arc_id": arc_id,
-                "phase_id": phase_id
-            }
-            self.chat_history.append(ai_chat_entry)
-            print(f"[DEBUG] Appending and broadcasting AI message: {ai_chat_entry}")
-            asyncio.create_task(self._broadcast_event({"type": "chat", "payload": {"message": ai_chat_entry}}))
-            self.characters[character_id].log_message(character_id, "ai", ai_response)
-            await self.reflector.add_message(character_id, ai_response, "ai")
-            triggered_scenarios = self.scenario_manager.check_triggers(content, character_id)
-            scene_context = {
-                "scene_content": content + " " + str(ai_response),
-                "active_characters": [character_id, "user"]
-            }
+            # Route message to agent via AgentManager (if destination is a character)
+            ai_response = None
+            ai_chat_entry = None
+            if destination in self.characters:
+                agent_result = await self.agent_manager.route_message_to_agent(
+                    destination, content, context=context, metadata=None
+                )
+                ai_response = agent_result.get("response")
+                if isinstance(ai_response, dict) and "content" in ai_response:
+                    ai_response = ai_response["content"]
+                ai_chat_entry = {
+                    "source": destination,
+                    "destination": source,
+                    "content": ai_response,
+                    "timestamp": asyncio.get_event_loop().time(),
+                    "arc_id": arc_id,
+                    "phase_id": phase_id
+                }
+                self.chat_history.append(ai_chat_entry)
+                print(f"[DEBUG] Appending and broadcasting AI reply: {ai_chat_entry}")
+                asyncio.create_task(self._broadcast_event({"type": "chat", "payload": {"message": ai_chat_entry}}))
+                self.characters[destination].log_message(destination, "ai", ai_response)
+                
+                # --- NEW: Send AI response through ExoLink for Reflector orchestration ---
+                from core.exolink import router as exolink_router
+                from core.exolink.models import Source, Target, SourceType, TargetType, ExchangeType
+                
+                # Create ExoLink exchange for AI response
+                ai_source = Source(type=SourceType.ENTITY, identifier=destination)
+                # Send to the first character as a proxy target - the Reflector will catch it via subscription
+                proxy_target = list(self.characters.keys())[0] if self.characters else "max"
+                ai_target = Target(type=TargetType.ENTITY, identifier=proxy_target)
+                
+                # Send through ExoLink - this will trigger Reflector's _handle_character_message
+                try:
+                    await exolink_router.send(
+                        content=ai_response,
+                        source=ai_source,
+                        target=ai_target,
+                        exchange_type=ExchangeType.TEXT,
+                        metadata={"_ai_response": True, "_original_user": source, "_proxy_target": True}
+                    )
+                    print(f"[DEBUG] Sent AI response through ExoLink: {destination} > {proxy_target}")
+                except Exception as e:
+                    print(f"[DEBUG] ExoLink send failed: {e}")
+                
+                # Remove redundant add_message call - Reflector will handle this via ExoLink subscription
+                # await self.reflector.add_message(destination, ai_response, "ai")
+
+                # --- Character-to-character detection for AI replies ---
+                # Only if not already parsed, and not direct message
+                ai_response_str = ai_response
+                if isinstance(ai_response, dict) and 'response' in ai_response:
+                    ai_response_str = ai_response['response']
+                if (
+                    not message.get('_parsed')
+                    and (source != destination)
+                    and isinstance(ai_response_str, str)
+                ):
+                    pattern = r"(?:^|[.!?]\s+)(%s)[,:\s]" % "|".join([re.escape(name.capitalize()) for name in character_names if name != destination])
+                    matches = list(re.finditer(pattern, ai_response_str))
+                    if matches:
+                        match = matches[0]
+                        addressed_name = matches[0].group(1).lower()
+                        if addressed_name in character_names:
+                            print(f"[DEBUG] Character-to-character detected in AI reply: {destination} > {addressed_name}")
+                            part = {
+                                "source": destination,
+                                "destination": addressed_name,
+                                "content": ai_response_str,
+                                "_parsed": True
+                            }
+                            resp = await send_message(part)
+                            # Optionally, return both the original and the routed message
+                            return {"status": "character_to_character", "original": ai_chat_entry, "routed": resp}
+                # --- END character-to-character logic for AI replies ---
+
+            triggered_scenarios = self.scenario_manager.check_triggers(content, destination)
+            scene_context = {"scene_content": content + (" " + str(ai_response) if ai_response else ""), "active_characters": [source, destination]}
             arc_transitions = self.scenario_manager.update_narrative_arcs(scene_context)
-            asyncio.create_task(self._broadcast_event({"type": "memory", "payload": {"character_id": character_id, "log": self.characters[character_id].get_memory_log()}}))
+            if destination in self.characters:
+                asyncio.create_task(self._broadcast_event({
+                    "type": "memory",
+                    "payload": {"character_id": destination, "log": self.characters[destination].get_memory_log()}
+                }))
             scene_summary = self.reflector.get_current_scene_summary()
             if scene_summary:
                 asyncio.create_task(self._broadcast_event({"type": "scene", "payload": scene_summary.to_dict()}))
@@ -347,9 +490,9 @@ class TVShowRouter:
             asyncio.create_task(self._broadcast_event({"type": "narrative", "payload": arcs}))
             return {
                 "status": "success",
-                "message": "Message sent and AI responded",
+                "message": "Message sent and AI responded" if ai_response else "Message sent",
                 "user_message": user_chat_entry,
-                "ai_response": ai_chat_entry,
+                "ai_response": ai_chat_entry if ai_response else None,
                 "triggered_scenarios": [s.scenario_id for s in triggered_scenarios],
                 "triggered_arcs": [arc.arc_id for arc in triggered_arcs],
                 "arc_transitions": arc_transitions
