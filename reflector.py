@@ -118,7 +118,7 @@ class Reflector:
             msg_type="user"
         )
     
-    def add_message(self, 
+    async def add_message(self, 
                    speaker: str, 
                    content: str, 
                    msg_type: str = "chat",
@@ -150,24 +150,7 @@ class Reflector:
         
         # Always generate a new summary after every message
         print(f"[DEBUG] Reflector - Generating summary after message {len(self.conversation_log)}")
-        self._generate_summary()
-    
-    def _generate_summary(self) -> None:
-        """Generate a new scene summary based on recent conversation."""
-        print(f"[DEBUG] Reflector - _generate_summary called with {len(self.conversation_log)} messages")
-        
-        if not self.conversation_log:
-            print("[DEBUG] Reflector - No conversation log, skipping summary")
-            return
-        
-        # Get recent messages for summarization
-        recent_messages = self.conversation_log[-self.summary_interval:]
-        print(f"[DEBUG] Reflector - Processing {len(recent_messages)} recent messages for summary")
-        
-        # Simple heuristic-based summarization for now
-        # (Can be replaced with LLM-based summarization later)
-        summary = self._heuristic_summarize(recent_messages)
-        print(f"[DEBUG] Reflector - Generated summary: {summary}")
+        summary = await self._generate_summary(self.conversation_log[-self.summary_interval:])
         
         # Create scene summary
         scene_summary = SceneSummary(
@@ -189,8 +172,8 @@ class Reflector:
         
         print(f"🎭 Scene summary generated: {summary['summary'][:100]}... (tone: {summary['tone']}, score: {summary['tone_score']:.2f})")
     
-    def _heuristic_summarize(self, messages: List[Dict[str, Any]]) -> Dict[str, str]:
-        """Generate a heuristic-based summary of recent messages."""
+    async def _generate_summary(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Generate a summary of recent messages using LocalLLM."""
         if not messages:
             return {
                 "summary": "No recent activity",
@@ -199,111 +182,63 @@ class Reflector:
                 "tone_score": 0.0
             }
         
-        # Extract content and speakers
-        def _extract_content(msg):
-            c = msg['content'] if isinstance(msg, dict) and 'content' in msg else str(msg)
-            if isinstance(c, dict) and 'response' in c:
-                return str(c['response'])
-            return str(c)
-        contents = [_extract_content(m) for m in messages]
-        speakers = [msg["speaker"] for msg in messages]
+        # Format as dialogue for LLM analysis
+        dialogue = "\n".join(f"{m['speaker'].capitalize()}: {m['content'] if isinstance(m['content'], str) else m['content'].get('response', str(m['content']))}" for m in messages)
         
-        # More sophisticated theme detection based on actual content
-        all_content = " ".join(contents).lower()
-        
-        # Enhanced theme detection with more specific keywords
-        themes = []
-        theme_keywords = {
-            "humanity": ["human", "humanity", "people", "emotions", "feelings", "consciousness", "existence"],
-            "aesthetics": ["beauty", "art", "beautiful", "aesthetic", "tapestry", "poetry", "creative"],
-            "creativity": ["create", "invent", "imagine", "new", "innovative", "creative", "experiment"],
-            "philosophy": ["existential", "existence", "futility", "meaning", "purpose", "philosophy", "metaphysics"],
-            "technology": ["technology", "digital", "computer", "ai", "machine", "system", "code"],
-            "nature": ["nature", "environment", "earth", "natural", "organic", "life"],
-            "relationships": ["friendship", "relationship", "connection", "bond", "together", "group"],
-            "learning": ["learn", "understand", "knowledge", "education", "study", "discover"],
-            "entertainment": ["fun", "entertainment", "enjoy", "pleasure", "amusement", "hobby"],
-            "work": ["work", "job", "career", "professional", "business", "project"]
-        }
-        
-        # Count theme matches
-        theme_counts = {}
-        for theme_name, keywords in theme_keywords.items():
-            count = sum(1 for keyword in keywords if keyword in all_content)
-            if count > 0:
-                theme_counts[theme_name] = count
-        
-        # Select the most prominent theme
-        if theme_counts:
-            theme = max(theme_counts.items(), key=lambda x: x[1])[0]
-        else:
-            theme = "general discussion"
-        
-        # Enhanced tone detection with more nuanced analysis
-        tone_indicators = {
-            "excited": ["!", "amazing", "incredible", "wow", "excited", "thrilled", "fantastic", "brilliant"],
-            "melancholic": ["sad", "lonely", "existential", "crisis", "melancholy", "depressed", "futility", "pointless"],
-            "curious": ["?", "wonder", "curious", "think", "explore", "discover", "fascinating", "interesting"],
-            "creative": ["create", "invent", "imagine", "new", "innovative", "creative", "artistic", "beautiful"],
-            "frustrated": ["frustrated", "angry", "annoyed", "irritated", "tense", "predictable", "boring"],
-            "calm": ["calm", "peaceful", "serene", "relaxed", "content", "gentle", "tranquil"],
-            "positive": ["happy", "joy", "pleased", "satisfied", "optimistic", "delightful", "wonderful"],
-            "negative": ["unhappy", "disappointed", "pessimistic", "worried", "anxious", "concerned"],
-            "sarcastic": ["sarcastic", "cynical", "ironic", "witty", "dry", "humor", "absurd"]
-        }
-        
-        # Calculate tone score based on content analysis
-        tone_score = 0.0
-        tone_counts = {}
-        
-        for tone_name, indicators in tone_indicators.items():
-            count = sum(1 for indicator in indicators 
-                       for content in contents 
-                       if indicator in content.lower())
-            tone_counts[tone_name] = count
-        
-        # Calculate overall tone score with more nuanced weighting
-        positive_indicators = tone_counts.get("excited", 0) + tone_counts.get("creative", 0) + tone_counts.get("positive", 0) + tone_counts.get("curious", 0)
-        negative_indicators = tone_counts.get("melancholic", 0) + tone_counts.get("frustrated", 0) + tone_counts.get("negative", 0)
-        neutral_indicators = tone_counts.get("calm", 0) + tone_counts.get("sarcastic", 0)
-        
-        total_indicators = positive_indicators + negative_indicators + neutral_indicators
-        if total_indicators > 0:
-            tone_score = (positive_indicators - negative_indicators) / total_indicators
-        else:
-            tone_score = 0.0  # Neutral if no clear indicators
-        
-        # Clamp tone score to [-1.0, 1.0]
-        tone_score = max(-1.0, min(1.0, tone_score))
-        
-        # Determine primary tone
-        tone = "neutral"
-        max_count = 0
-        for tone_name, count in tone_counts.items():
-            if count > max_count:
-                max_count = count
-                tone = tone_name
-        
-        # Generate more dynamic summary based on actual content
-        unique_speakers = list(set(speakers))
-        
-        # Create more specific summary based on conversation length and content
-        if len(messages) <= 2:
-            # Very short conversations
-            summary = f"{', '.join(unique_speakers)} exchanged brief {theme}-related thoughts."
-        elif len(messages) <= 5:
-            # Short conversations
-            summary = f"{', '.join(unique_speakers)} engaged in a {tone} discussion about {theme}."
-        else:
-            # Longer conversations
-            summary = f"The group ({', '.join(unique_speakers)}) had an extended {tone} conversation exploring {theme}."
-        
-        return {
-            "summary": summary,
-            "theme": theme,
-            "tone": tone,
-            "tone_score": tone_score
-        }
+        try:
+            # Use LocalLLM for accurate analysis
+            from core.llm.local_llm import LocalLLM
+            llm = LocalLLM()
+            
+            prompt = f"""Analyze this conversation and provide a structured summary in JSON format:
+
+{dialogue}
+
+Provide a JSON response with:
+- summary: 1-2 sentence summary of what was discussed
+- theme: the main topic/theme (be specific, e.g., "beer brewing", "human emotions", "technology")
+- tone: the overall emotional tone (excited, calm, curious, etc.)
+- tone_score: a number between 0-1 indicating intensity
+
+JSON:"""
+            
+            response = await llm.generate(prompt, max_tokens=200)
+            
+            # Try to parse JSON response
+            import json
+            import re
+            try:
+                # Clean up the response - remove any extra text before/after JSON
+                cleaned_response = response.strip()
+                # Find JSON object in the response
+                json_match = re.search(r'\{.*\}', cleaned_response, re.DOTALL)
+                if json_match:
+                    cleaned_response = json_match.group(0)
+                
+                result = json.loads(cleaned_response)
+                print(f"[DEBUG] LocalLLM generated scene summary: {result}")
+                return result
+            except json.JSONDecodeError as e:
+                print(f"[DEBUG] JSON parsing failed: {e}")
+                # Fallback if JSON parsing fails
+                return {
+                    "summary": response.strip()[:100],
+                    "theme": "general discussion",
+                    "tone": "neutral",
+                    "tone_score": 0.5
+                }
+                
+        except Exception as e:
+            print(f"[DEBUG] LocalLLM scene summary failed: {e}")
+            # Fallback to simple summary
+            speakers = [msg['speaker'].capitalize() for msg in messages]
+            unique_speakers = list(set(speakers))
+            return {
+                "summary": f"{', '.join(unique_speakers)} had a conversation.",
+                "theme": "general discussion",
+                "tone": "neutral",
+                "tone_score": 0.5
+            }
     
     def get_current_scene_summary(self) -> Optional[SceneSummary]:
         """Get the most recent scene summary, enriched with lore context."""
@@ -326,7 +261,7 @@ class Reflector:
         return summary
     
     async def summarize_dialogue_with_fastllm(self, n_messages: int = 10, n_sentences: int = 4) -> str:
-        """Summarize the last n_messages using a simple heuristic approach."""
+        """Summarize the last n_messages using LocalLLM for accurate theme detection."""
         messages = self.conversation_log[-n_messages:]
         print(f"[DEBUG] summarize_dialogue_with_fastllm called with {len(messages)} messages")
         
@@ -338,61 +273,27 @@ class Reflector:
         dialogue = "\n".join(f"{m['speaker'].capitalize()}: {m['content'] if isinstance(m['content'], str) else m['content'].get('response', str(m['content']))}" for m in messages)
         print(f"[DEBUG] Formatted dialogue: {dialogue[:200]}...")
         
-        # Extract key information from the messages
-        speakers = [msg['speaker'].capitalize() for msg in messages]
-        unique_speakers = list(set(speakers))
-        
-        # Extract themes from content with more sophisticated analysis
-        all_content = " ".join([str(m['content']) if isinstance(m['content'], str) else str(m['content'].get('response', '')) for m in messages])
-        
-        # Enhanced theme detection
-        theme_keywords = {
-            "beverages": ["beer", "drink", "alcohol", "wine", "cocktail", "beverage"],
-            "humanity": ["human", "humanity", "people", "emotions", "feelings", "consciousness", "existence"],
-            "creativity": ["create", "creative", "art", "beauty", "imagine", "innovative", "tapestry", "poetry"],
-            "philosophy": ["existential", "existence", "futility", "meaning", "purpose", "philosophy", "metaphysics"],
-            "technology": ["technology", "digital", "computer", "ai", "machine", "system", "code"],
-            "relationships": ["friendship", "relationship", "connection", "bond", "together", "group"],
-            "learning": ["learn", "understand", "knowledge", "education", "study", "discover"],
-            "entertainment": ["fun", "entertainment", "enjoy", "pleasure", "amusement", "hobby"],
-            "greetings": ["hello", "hi", "greeting", "welcome", "good morning", "good evening"]
-        }
-        
-        # Count theme matches
-        theme_counts = {}
-        for theme_name, keywords in theme_keywords.items():
-            count = sum(1 for keyword in keywords if keyword in all_content.lower())
-            if count > 0:
-                theme_counts[theme_name] = count
-        
-        # Select the most prominent theme
-        if theme_counts:
-            theme = max(theme_counts.items(), key=lambda x: x[1])[0]
-        else:
-            theme = "general discussion"
-        
-        # Create more dynamic summary based on conversation content and length
-        if len(messages) <= 2:
-            # Very short conversations - just mention the key points
-            summary_parts = []
-            for msg in messages[-2:]:
-                speaker = msg['speaker'].capitalize()
-                content = str(msg['content']) if isinstance(msg['content'], str) else str(msg['content'].get('response', ''))
-                # Extract key phrase (first 30 chars or first sentence)
-                key_phrase = content[:30] if len(content) <= 30 else content.split('.')[0][:30]
-                summary_parts.append(f"{speaker} said '{key_phrase}...'")
-            summary = " ".join(summary_parts)
-        elif len(messages) <= 5:
-            # Short conversations - summarize the main topic
-            summary = f"{', '.join(unique_speakers)} had a brief conversation about {theme}. "
-            summary += f"They exchanged {len(messages)} messages on this topic."
-        else:
-            # Longer conversations - provide more detailed summary
-            summary = f"The group ({', '.join(unique_speakers)}) engaged in an extended discussion about {theme}. "
-            summary += f"Over {len(messages)} messages, they explored various aspects of this topic."
-        
-        print(f"[DEBUG] Generated summary: {summary}")
-        return summary
+        try:
+            # Use LocalLLM for accurate summarization
+            from core.llm.local_llm import LocalLLM
+            llm = LocalLLM()
+            
+            prompt = f"""Analyze this conversation and provide a brief summary (2-3 sentences) of what was discussed:
+
+{dialogue}
+
+Summary:"""
+            
+            response = await llm.generate(prompt, max_tokens=100)
+            summary = response.strip()
+            print(f"[DEBUG] LocalLLM generated summary: {summary}")
+            return summary
+            
+        except Exception as e:
+            print(f"[DEBUG] LocalLLM summarization failed: {e}")
+            # Fallback to simple join
+            fallback_messages = [f"{m['speaker'].capitalize()}: {m['content'] if isinstance(m['content'], str) else m['content'].get('response', str(m['content']))}" for m in messages[-3:]]
+            return " ".join(fallback_messages)
 
     async def get_scene_context_for_character(self, character_id: str) -> str:
         """Get scene context formatted for a specific character, with LLM recap and recent dialogue."""

@@ -174,7 +174,7 @@ class TVShowRouter:
         asyncio.create_task(self._broadcast_event({"type": "chat", "payload": {"message": ai_chat_entry}}))
         # Log to character memory, Reflector, etc. as needed
         character.log_message("user", "user", user_message)
-        self.reflector.add_message(character_id, cleaned, "autonomous")
+        await self.reflector.add_message(character_id, cleaned, "autonomous")
         # Broadcast memory and scene updates
         asyncio.create_task(self._broadcast_event({"type": "memory", "payload": {"character_id": character_id, "log": character.get_memory_log()}}))
         scene_summary = self.reflector.get_current_scene_summary()
@@ -279,7 +279,7 @@ class TVShowRouter:
                 self.chat_history.append(scene_chat_entry)
                 print(f"[DEBUG] Appending and broadcasting scene message: {scene_chat_entry}")
                 asyncio.create_task(self._broadcast_event({"type": "chat", "payload": {"message": scene_chat_entry}}))
-                self.reflector.add_message("scene", content, "scene")
+                await self.reflector.add_message("scene", content, "scene")
                 # Still check for arc/scenario triggers
                 triggered_arcs = self.scenario_manager.check_arc_triggers(content, "scene")
                 for arc in triggered_arcs:
@@ -310,7 +310,7 @@ class TVShowRouter:
             print(f"[DEBUG] Appending and broadcasting user message: {user_chat_entry}")
             asyncio.create_task(self._broadcast_event({"type": "chat", "payload": {"message": user_chat_entry}}))
             self.characters[character_id].log_message("user", "user", content)
-            self.reflector.add_message("user", content, "user")
+            await self.reflector.add_message("user", content, "user")
             triggered_arcs = self.scenario_manager.check_arc_triggers(content, character_id)
             for arc in triggered_arcs:
                 self.scenario_manager.activate_narrative_arc(arc.arc_id)
@@ -332,7 +332,7 @@ class TVShowRouter:
             print(f"[DEBUG] Appending and broadcasting AI message: {ai_chat_entry}")
             asyncio.create_task(self._broadcast_event({"type": "chat", "payload": {"message": ai_chat_entry}}))
             self.characters[character_id].log_message(character_id, "ai", ai_response)
-            self.reflector.add_message(character_id, ai_response, "ai")
+            await self.reflector.add_message(character_id, ai_response, "ai")
             triggered_scenarios = self.scenario_manager.check_triggers(content, character_id)
             scene_context = {
                 "scene_content": content + " " + str(ai_response),
