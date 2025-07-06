@@ -251,11 +251,11 @@ class TVShowEntity(BaseEntity):
 
     async def build_contextual_prompt(self, user_message: str = None, scene_context: str = None, arc_context: str = None) -> str:
         """Build a context-rich prompt for the LLM, including memory, mood, scenario, and lore."""
-        # Retrieve shared scene context from the Reflector
+        # Retrieve shared scene context from the Reflector (now async)
         shared_scene_context = None
         if hasattr(self, 'CHARACTER_ID') and self.CHARACTER_ID:
             try:
-                shared_scene_context = reflector.get_scene_context_for_character(self.CHARACTER_ID)
+                shared_scene_context = await reflector.get_scene_context_for_character(self.CHARACTER_ID)
                 print(f"[DEBUG] {self.CHARACTER_NAME} - Retrieved shared scene context: {shared_scene_context}")
             except Exception as e:
                 print(f"[DEBUG] Could not get shared scene context: {e}")

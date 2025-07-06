@@ -113,6 +113,7 @@ function ChatFeed() {
           onChange={(e) => setSelectedCharacter(e.target.value)}
           style={{ padding: '10px', background: '#1a1a1a', color: '#ffffff', border: '1px solid #444', borderRadius: '4px' }}
         >
+          <option value="">To all</option>
           <option value="max">Max</option>
           <option value="leo">Leo</option>
           <option value="emma">Emma</option>

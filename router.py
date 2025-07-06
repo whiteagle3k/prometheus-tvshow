@@ -17,7 +17,7 @@ import random
 
 from .entities import get_character, get_all_characters
 from .scenarios import ScenarioManager, create_sample_scenarios
-from .reflector import Reflector
+from .reflector import reflector  # Use the global singleton
 
 # Import Prometheus registry system
 from core.runtime.registry import register_entity_class, get_agent
@@ -36,7 +36,7 @@ class TVShowRouter:
         self.scenario_manager = ScenarioManager()
         self.chat_history: List[Dict[str, Any]] = []
         self._autonomy_task = None
-        self.reflector = Reflector()  # Add Reflector instance
+        self.reflector = reflector  # Use the global singleton
         self.ws_clients = set()  # Set of connected WebSocket clients
         # AgentManager and ContextBuilder
         self.agent_manager = AgentManager(self.characters)
