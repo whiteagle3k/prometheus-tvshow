@@ -15,6 +15,7 @@ import json
 import os
 import random
 import re
+import time
 
 from .entities import get_character, get_all_characters
 from .scenarios import ScenarioManager, create_sample_scenarios
@@ -42,6 +43,9 @@ class TVShowRouter:
         # AgentManager and ContextBuilder
         self.agent_manager = AgentManager(self.characters)
         self.context_builder = ChatContextBuilder(self.reflector, self.scenario_manager)
+        
+        # Initialize character names cache
+        self._character_names = None
         # Register TV show characters with Prometheus registry
         self._register_characters()
         # Initialize sample scenarios
@@ -255,6 +259,42 @@ class TVShowRouter:
                 "identity": character.identity_config
             }
         
+        async def _handle_character_addressing(self, source: str, content: str) -> Optional[Dict]:
+            """
+            Handle character addressing in a message and return handoff details if needed.
+            Returns None if no addressing is detected, or a dict with handoff details.
+            """
+            if not self._character_names:
+                from .entities import get_all_characters
+                self._character_names = list(get_all_characters().keys())
+            
+            # If source is a character, exclude them from the list
+            character_names = [name for name in self._character_names if name != source]
+            
+            if not character_names:
+                return None
+            
+            # Enhanced pattern to catch more natural language patterns
+            pattern = r'(?:^|[.!?]\s+)(%s)(?:[,\s:!?.]|\s*\'s)' % "|".join([re.escape(name.capitalize()) for name in character_names])
+            matches = list(re.finditer(pattern, content, re.IGNORECASE))
+            
+            if matches:
+                addressed_name = matches[0].group(1).lower()
+                if addressed_name in character_names:
+                    # Extract the part of the message after the character's name
+                    content_start = matches[0].start(1)
+                    message_content = content[content_start + len(addressed_name):].lstrip(' ,:!?.\n')
+                    
+                    if message_content:  # Only if there's content after the name
+                        return {
+                            "from_character": source,
+                            "to_character": addressed_name,
+                            "original_content": content,
+                            "message_content": f"{addressed_name.capitalize()}, {message_content}",
+                            "match_position": content_start
+                        }
+            return None
+            
         @self.app.post("/tvshow/chat")
         async def send_message(message: Dict[str, Any]):
             print(f"[DEBUG] /tvshow/chat handler called with: {message}")
@@ -318,24 +358,39 @@ class TVShowRouter:
                 and (not message.get('_parsed'))
                 and (not destination or destination == 'user' or destination == 'all')
             ):
-                # Regex: look for e.g. "Marvin," or "Marvin:"
-                pattern = r"(?:^|[.!?]\s+)(%s)[,:\s]" % "|".join([re.escape(name.capitalize()) for name in character_names if name != source])
-                matches = list(re.finditer(pattern, content))
-                if matches:
-                    match = matches[0]
-                    # Route the whole message to the addressed character
-                    addressed_name = matches[0].group(1).lower()
-                    if addressed_name in character_names:
-                        print(f"[DEBUG] Character-to-character detected: {source} > {addressed_name}")
-                        part = {
-                            "source": source,
-                            "destination": addressed_name,
-                            "content": content,
-                            "_parsed": True
+                # Convert content to string if it's a dictionary
+                content_str = content['response'] if isinstance(content, dict) and 'response' in content else str(content)
+                
+                # Use the enhanced character detection method
+                handoff = await self._handle_character_addressing(source, content_str)
+                if handoff:
+                    print(f"[DEBUG] Character-to-character detected: {handoff['from_character']} > {handoff['to_character']}")
+                    
+                    # Create the handoff message
+                    handoff_message = {
+                        "source": handoff['from_character'],
+                        "destination": handoff['to_character'],
+                        "content": handoff['message_content'],
+                        "_parsed": True,
+                        "_character_handoff": True,
+                        "metadata": {
+                            "handoff_from": handoff['from_character'],
+                            "original_content": handoff['original_content'],
+                            "handoff_timestamp": time.time()
                         }
-                        resp = await send_message(part)
-                        # Optionally, return both the original and the routed message
-                        return {"status": "character_to_character", "original": user_chat_entry, "routed": resp}
+                    }
+                    
+                    try:
+                        # Send the message through the router
+                        resp = await send_message(handoff_message)
+                        print(f"[DEBUG] Successfully routed message to {handoff['to_character']}")
+                        return {
+                            "status": "character_to_character", 
+                            "original": user_chat_entry, 
+                            "routed": resp
+                        }
+                    except Exception as e:
+                        print(f"[ERROR] Failed to route message to {handoff['to_character']}: {e}")
             # --- END character-to-character logic ---
 
             context = self.context_builder.build_context(character_id, content)
@@ -431,48 +486,131 @@ class TVShowRouter:
                 proxy_target = list(self.characters.keys())[0] if self.characters else "max"
                 ai_target = Target(type=TargetType.ENTITY, identifier=proxy_target)
                 
-                # Send through ExoLink - this will trigger Reflector's _handle_character_message
+                # First, check if this message is addressing another character
+                response_content = ai_response['response'] if isinstance(ai_response, dict) and 'response' in ai_response else str(ai_response)
+                
+                # Check for character addressing
+                if destination != source:  # Only if not already a direct message
+                    from .entities import get_all_characters
+                    all_character_names = list(get_all_characters().keys())
+                    character_names = [name for name in all_character_names if name != destination]
+                    
+                    # Look for character names at the start of sentences or after punctuation
+                    pattern = r'(?:^|[.!?]\s+)(%s)[,:\s!?.]' % "|".join([re.escape(name.capitalize()) for name in character_names])
+                    matches = list(re.finditer(pattern, response_content, re.IGNORECASE))
+                    
+                    if matches:
+                        addressed_name = matches[0].group(1).lower()
+                        if addressed_name in character_names and addressed_name != destination:
+                            print(f"[DEBUG] Character-to-character detected in AI reply: {destination} > {addressed_name}")
+                            
+                            # Extract the part of the message after the character's name
+                            content_start = matches[0].start(1)
+                            message_content = response_content[content_start + len(addressed_name):].lstrip(' ,:!?.\n')
+                            
+                            if message_content:  # Only if there's content after the name
+                                # Create a new message for the addressed character
+                                handoff_message = {
+                                    "source": destination,
+                                    "destination": addressed_name,
+                                    "content": f"{addressed_name.capitalize()}, {message_content}",
+                                    "_parsed": True,
+                                    "_character_handoff": True,
+                                    "metadata": {
+                                        "handoff_from": destination,
+                                        "original_content": response_content,
+                                        "handoff_timestamp": time.time()
+                                    }
+                                }
+                                
+                                # Send the message through the router
+                                try:
+                                    resp = await send_message(handoff_message)
+                                    print(f"[DEBUG] Successfully routed message to {addressed_name}")
+                                    return {
+                                        "status": "character_to_character",
+                                        "original": ai_chat_entry,
+                                        "routed": resp
+                                    }
+                                except Exception as e:
+                                    print(f"[ERROR] Failed to route message to {addressed_name}: {e}")
+                
+                # If no character addressing or error, send to original target
                 try:
                     await exolink_router.send(
-                        content=ai_response,
+                        content=response_content,
                         source=ai_source,
                         target=ai_target,
                         exchange_type=ExchangeType.TEXT,
-                        metadata={"_ai_response": True, "_original_user": source, "_proxy_target": True}
+                        metadata={
+                            "_ai_response": True,
+                            "_original_user": source,
+                            "_proxy_target": True,
+                            "_original_response": ai_response if isinstance(ai_response, dict) else None
+                        }
                     )
                     print(f"[DEBUG] Sent AI response through ExoLink: {destination} > {proxy_target}")
                 except Exception as e:
                     print(f"[DEBUG] ExoLink send failed: {e}")
+                    import traceback
+                    traceback.print_exc()  # Print full traceback for debugging
                 
                 # Remove redundant add_message call - Reflector will handle this via ExoLink subscription
                 # await self.reflector.add_message(destination, ai_response, "ai")
 
-                # --- Character-to-character detection for AI replies ---
+                    # --- Character-to-character detection for AI replies ---
                 # Only if not already parsed, and not direct message
-                ai_response_str = ai_response
-                if isinstance(ai_response, dict) and 'response' in ai_response:
-                    ai_response_str = ai_response['response']
-                if (
-                    not message.get('_parsed')
-                    and (source != destination)
-                    and isinstance(ai_response_str, str)
-                ):
-                    pattern = r"(?:^|[.!?]\s+)(%s)[,:\s]" % "|".join([re.escape(name.capitalize()) for name in character_names if name != destination])
-                    matches = list(re.finditer(pattern, ai_response_str))
-                    if matches:
-                        match = matches[0]
-                        addressed_name = matches[0].group(1).lower()
-                        if addressed_name in character_names:
-                            print(f"[DEBUG] Character-to-character detected in AI reply: {destination} > {addressed_name}")
-                            part = {
-                                "source": destination,
-                                "destination": addressed_name,
-                                "content": ai_response_str,
-                                "_parsed": True
-                            }
-                            resp = await send_message(part)
-                            # Optionally, return both the original and the routed message
-                            return {"status": "character_to_character", "original": ai_chat_entry, "routed": resp}
+                ai_response_str = ai_response['response'] if isinstance(ai_response, dict) and 'response' in ai_response else str(ai_response)
+                
+                if not message.get('_parsed') and source != destination and ai_response_str:
+                    # Get all character names
+                    from .entities import get_all_characters
+                    all_character_names = list(get_all_characters().keys())
+                    character_names = [name for name in all_character_names if name != destination]
+                    
+                    if character_names:  # Only proceed if there are other characters to address
+                        # Look for character names at the start of sentences or after punctuation
+                        pattern = r'(?:^|[.!?]\s+)(%s)[,:\s!?.]' % "|".join([re.escape(name.capitalize()) for name in character_names])
+                        matches = list(re.finditer(pattern, ai_response_str, re.IGNORECASE))
+                        
+                        if matches:
+                            addressed_name = matches[0].group(1).lower()
+                            if addressed_name in character_names:
+                                print(f"[DEBUG] Character-to-character detected in AI reply: {destination} > {addressed_name}")
+                                
+                                # Extract the part of the message after the character's name
+                                content_start = matches[0].start(1)
+                                message_content = ai_response_str[content_start + len(addressed_name):].lstrip(' ,:!?.\n')
+                                
+                                if message_content:  # Only if there's content after the name
+                                    # Create a new message for the addressed character
+                                    handoff_message = {
+                                        "source": destination,
+                                        "destination": addressed_name,
+                                        "content": f"{addressed_name.capitalize()}, {message_content}",
+                                        "_parsed": True,
+                                        "_character_handoff": True,
+                                        "metadata": {
+                                            "handoff_from": destination,
+                                            "original_content": ai_response_str,
+                                            "handoff_timestamp": time.time()
+                                        }
+                                    }
+                                    
+                                    # Send the message through the router
+                                    try:
+                                        resp = await send_message(handoff_message)
+                                        print(f"[DEBUG] Successfully routed message to {addressed_name}")
+                                        return {
+                                            "status": "character_to_character",
+                                            "original": ai_chat_entry,
+                                            "routed": resp
+                                        }
+                                    except Exception as e:
+                                        print(f"[ERROR] Failed to route message to {addressed_name}: {e}")
+                
+                # If we get here, no character was addressed or there was an error
+                print(f"[DEBUG] No character addressed in message or error occurred")
                 # --- END character-to-character logic for AI replies ---
 
             triggered_scenarios = self.scenario_manager.check_triggers(content, destination)

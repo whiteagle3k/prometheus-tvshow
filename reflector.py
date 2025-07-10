@@ -112,122 +112,65 @@ class Reflector(BaseEntity):
         router.subscribe("entity:*", self._handle_character_message)
         # Also subscribe to wildcard to catch all messages
         router.subscribe("*", self._handle_character_message)
-        print("🎭 Reflector subscribed to character messages via ExoLink")
+        print(" Reflector subscribed to character messages via ExoLink")
     
-    def _handle_character_message(self, exchange: Exchange):
-        """Handle incoming character messages from ExoLink."""
+    async def _handle_character_message(self, exchange: Exchange):
+        """Handle incoming character messages from ExoLink for context tracking only.
+        
+        This method only logs messages to maintain conversation context and does not
+        modify or route messages in any way.
+        """
         try:
             # Extract message details from the exchange
             speaker = exchange.source.identifier
             content = exchange.content
             
-            # Check if this is a proxy message (AI response sent through ExoLink)
-            if exchange.metadata.get("_proxy_target", False):
-                # This is an AI response sent through ExoLink - use the original source
-                speaker = exchange.source.identifier  # This is the actual character (e.g., "max")
-                print(f"[DEBUG] Reflector received proxy AI message from {speaker}: {content}")
-                msg_type = "ai"
-            elif speaker in ["max", "leo", "emma", "marvin"]:
-                print(f"[DEBUG] Reflector received character message from {speaker}: {content}")
-                msg_type = "ai"
-            elif speaker == "user" or "user" in speaker.lower():
-                print(f"[DEBUG] Reflector received user message: {content}")
-                msg_type = "user"
-            else:
-                # Skip other types of messages
+            # Skip processing if this is a handoff message (already handled by router)
+            if exchange.metadata.get("_character_handoff", False):
+                print(f"[DEBUG] Reflector skipping handoff message: {speaker} > {exchange.target.identifier}")
                 return
+                
+            # Handle different content types
+            if isinstance(content, dict):
+                # If content is a dictionary, extract the response or content field
+                if 'response' in content:
+                    content = content['response']
+                elif 'content' in content:
+                    content = content['content']
+                else:
+                    content = str(content)
             
-            # Extract actual response text if content is a response object
-            actual_content = content
-            if isinstance(content, dict) and "response" in content:
-                actual_content = content["response"]
-            elif isinstance(content, str):
-                actual_content = content
+            # Ensure content is a string
+            if not isinstance(content, str):
+                content = str(content)
+            
+            # Determine message type
+            if exchange.metadata.get("_proxy_target", False):
+                msg_type = "ai"
+                print(f"[DEBUG] Reflector received AI message from {speaker}: {content}")
+            elif speaker in ["max", "leo", "emma", "marvin"]:
+                msg_type = "ai"
+                print(f"[DEBUG] Reflector received character message from {speaker}: {content}")
+            elif speaker == "user" or "user" in speaker.lower():
+                msg_type = "user"
+                print(f"[DEBUG] Reflector received user message: {content}")
             else:
-                actual_content = str(content)
+                msg_type = "system"
+                print(f"[DEBUG] Reflector received system message from {speaker}: {content}")
             
-            # Add to conversation log (always await async method)
-            asyncio.create_task(self.add_message(
+            # Add the message to the conversation log for context
+            await self.add_message(
                 speaker=speaker,
-                content=actual_content,
+                content=content,
                 msg_type=msg_type
-            ))
-            
-            # --- NEW: Character-to-character orchestration via ExoLink ---
-            if (speaker in ["max", "leo", "emma", "marvin"] and 
-                not exchange.metadata.get("_orchestrated", False)):
-                addressed_character = self._detect_addressed_character(speaker, actual_content)
-                if addressed_character:
-                    print(f"[DEBUG] Reflector detected character-to-character: {speaker} > {addressed_character}")
-                    asyncio.create_task(self._trigger_character_handoff(
-                        from_character=speaker,
-                        to_character=addressed_character,
-                        original_content=actual_content
-                    ))
-        except Exception as e:
-            print(f"[DEBUG] Reflector error handling character message: {e}")
-    
-    def _detect_addressed_character(self, speaker: str, content: str) -> Optional[str]:
-        """Detect if a message addresses another character."""
-        # Get all character names
-        from .entities import get_all_characters
-        all_character_names = list(get_all_characters().keys())
-        
-        # If speaker is a character, exclude them from the list
-        if speaker in all_character_names:
-            character_names = [name for name in all_character_names if name != speaker]
-        else:
-            # If speaker is "user" or not a character, include all character names
-            character_names = all_character_names
-        
-        if not character_names:
-            return None
-        
-        # Regex: look for character names followed by comma, colon, space, or other punctuation
-        # More flexible pattern that catches names after any word, not just word boundaries
-        pattern = r'(%s)[,:\s?!.]' % "|".join([re.escape(name.capitalize()) for name in character_names])
-        matches = list(re.finditer(pattern, content))
-        
-        if matches:
-            addressed_name = matches[0].group(1).lower()
-            print(f"[DEBUG] Detected addressed character: {addressed_name} in content: {content[:100]}...")
-            return addressed_name
-        
-        return None
-    
-    async def _trigger_character_handoff(self, from_character: str, to_character: str, original_content: str):
-        """Trigger a character-to-character handoff via ExoLink."""
-        try:
-            print(f"[DEBUG] Triggering ExoLink handoff: {from_character} > {to_character}")
-            
-            # Create source and target for ExoLink
-            source = Source(type=SourceType.ENTITY, identifier=from_character)
-            target = Target(type=TargetType.ENTITY, identifier=to_character)
-            
-            # Add metadata to prevent infinite loops
-            metadata = {
-                "_orchestrated": True,
-                "_handoff_from": from_character,
-                "_original_content": original_content,
-                "_handoff_timestamp": time.time()
-            }
-            
-            # Send via ExoLink - this will trigger the character's registered handler
-            # router.send() returns a coroutine that must be awaited
-            result = await router.send(
-                content=original_content,
-                source=source,
-                target=target,
-                metadata=metadata
             )
             
-            print(f"[DEBUG] ExoLink handoff completed: {from_character} > {to_character}")
-            print(f"[DEBUG] Handoff result: {result}")
-            
         except Exception as e:
-            print(f"[DEBUG] ExoLink handoff failed: {e}")
+            print(f"[ERROR] Error in _handle_character_message: {e}")
             import traceback
             traceback.print_exc()
+    
+
     
     def add_user_message(self, content: str) -> None:
         """Manually add a user message (for API calls)."""
@@ -237,21 +180,33 @@ class Reflector(BaseEntity):
             content=content,
             msg_type="user"
         ))
-        addressed_character = self._detect_addressed_character("user", content)
-        if addressed_character:
-            print(f"[DEBUG] Reflector detected user addressing character: user > {addressed_character}")
-            asyncio.create_task(self._trigger_character_handoff(
-                from_character="user",
-                to_character=addressed_character,
-                original_content=content
-            ))
     
     async def add_message(self, 
                    speaker: str, 
-                   content: str, 
+                   content: Any, 
                    msg_type: str = "chat",
                    triggers: List[str] = None) -> None:
-        """Add a message to the conversation log."""
+        """Add a message to the conversation log.
+        
+        Args:
+            speaker: The name of the message sender
+            content: The message content (can be string or dict)
+            msg_type: Type of message (e.g., 'chat', 'system')
+            triggers: Any triggers associated with the message
+        """
+        # Handle different content types
+        if isinstance(content, dict):
+            if 'response' in content:
+                content = content['response']
+            elif 'content' in content:
+                content = content['content']
+            else:
+                content = str(content)
+        
+        # Ensure content is a string
+        if not isinstance(content, str):
+            content = str(content)
+        
         entry = {
             "timestamp": time.time(),
             "speaker": speaker,
