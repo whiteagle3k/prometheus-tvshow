@@ -71,6 +71,11 @@ class Reflector(BaseEntity):
         # Initialize as BaseEntity first
         super().__init__()
         
+        # Force router initialization if not set (avoid lightweight mode)
+        if self.router is None:
+            from core.llm.router import LLMRouter
+            self.router = LLMRouter(identity_config=self.identity_config)
+        
         self.conversation_log: List[Dict[str, Any]] = []
         self.scene_summaries: List[SceneSummary] = []
         self.summary_interval = summary_interval
@@ -270,7 +275,7 @@ class Reflector(BaseEntity):
         
         try:
             # Use the entity's LocalLLM instance (inherits neutral identity)
-            response = await self.llm_router.local_llm.generate(
+            response = await self.router.local_llm.generate(
                 prompt=f"""Analyze this conversation and provide a structured summary in JSON format:
 
 {dialogue}
@@ -356,7 +361,7 @@ JSON:""",
         
         try:
             # Use the entity's LocalLLM instance (inherits neutral identity)
-            response = await self.llm_router.local_llm.generate(
+            response = await self.router.local_llm.generate(
                 prompt=f"""Analyze this conversation and provide a brief summary (2-3 sentences) of what was discussed:
 
 {dialogue}
