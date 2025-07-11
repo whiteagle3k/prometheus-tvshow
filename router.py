@@ -461,8 +461,76 @@ class TVShowRouter:
                     destination, content, context=context, metadata=None
                 )
                 ai_response = agent_result.get("response")
-                if isinstance(ai_response, dict) and "content" in ai_response:
-                    ai_response = ai_response["content"]
+                if isinstance(ai_response, dict):
+                    ai_response = ai_response.get("content") or ai_response.get("response") or str(ai_response)
+
+                # --- SPLIT AI RESPONSE IF IT ADDRESSES ANOTHER CHARACTER ---
+                from .entities import get_all_characters
+                character_names = list(get_all_characters().keys())
+                character_names = [name for name in character_names if name != destination]
+                pattern = r"(?:^|[.!?]\s+)(%s)[,:\s]" % "|".join([re.escape(name.capitalize()) for name in character_names])
+                matches = list(re.finditer(pattern, ai_response))
+                if matches:
+                    match = matches[0]
+                    split_idx = match.start(1)
+                    before = ai_response[:split_idx].strip()
+                    after = ai_response[split_idx:].strip()
+                    addressed_name = None
+                    for name in character_names:
+                        if after.lower().startswith(name + ',') or after.lower().startswith(name + ':') or after.lower().startswith(name + ' '):
+                            addressed_name = name
+                            break
+                    if before:
+                        # Only send the 'own' part to the user
+                        ai_chat_entry = {
+                            "source": destination,
+                            "destination": source,
+                            "content": before,
+                            "timestamp": asyncio.get_event_loop().time(),
+                            "arc_id": arc_id,
+                            "phase_id": phase_id
+                        }
+                        self.chat_history.append(ai_chat_entry)
+                        print(f"[DEBUG] Appending and broadcasting AI reply (split): {ai_chat_entry}")
+                        asyncio.create_task(self._broadcast_event({"type": "chat", "payload": {"message": ai_chat_entry}}))
+                        self.characters[destination].log_message(destination, "ai", before)
+                    if addressed_name and after:
+                        # Route the addressed part as a new message to the addressed character
+                        handoff_message = {
+                            "source": destination,
+                            "destination": addressed_name,
+                            "content": after,
+                            "_parsed": True,
+                            "_character_handoff": True,
+                            "metadata": {
+                                "handoff_from": destination,
+                                "original_content": ai_response,
+                                "handoff_timestamp": time.time()
+                            }
+                        }
+                        try:
+                            resp = await send_message(handoff_message)
+                            print(f"[DEBUG] Successfully routed message to {addressed_name}")
+                            return {
+                                "status": "character_to_character",
+                                "original": ai_chat_entry,
+                                "routed": resp
+                            }
+                        except Exception as e:
+                            print(f"[ERROR] Failed to route message to {addressed_name}: {e}")
+                    # If only before part exists, return as normal
+                    return {
+                        "status": "success",
+                        "message": "Message sent and AI responded (split)",
+                        "user_message": user_chat_entry,
+                        "ai_response": ai_chat_entry if before else None,
+                        "triggered_scenarios": [],
+                        "triggered_arcs": [],
+                        "arc_transitions": []
+                    }
+                # --- END SPLIT LOGIC FOR AI RESPONSE ---
+
+                # If no split, proceed as before
                 ai_chat_entry = {
                     "source": destination,
                     "destination": source,
