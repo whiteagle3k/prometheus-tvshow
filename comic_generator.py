@@ -21,7 +21,17 @@ class ComicGenerator:
     def add_panel(self, speaker: str, text: str, mood_emoji: str) -> None:
         speaker_label = speaker or "?"
         safe_text = (text or "").strip()
-        emoji = (mood_emoji or "").strip()
+        # Optional emoji mapping for known moods
+        MOOD_EMOJI = {
+            "sigh": "😔",
+            "panic": "😱",
+            "confident": "💪",
+            "excited": "✨",
+            "smirk": "😏",
+            "default": "😐",
+        }
+        emoji_key = (mood_emoji or "").strip()
+        emoji = MOOD_EMOJI.get(emoji_key, emoji_key or MOOD_EMOJI["default"])
 
         panel = (
             "   ┌──────┐\n"
