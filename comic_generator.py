@@ -167,16 +167,19 @@ class ComicGenerator:
         # Open image with PIL for text overlay
         if PIL_AVAILABLE:
             try:
-                img = Image.open(BytesIO(data))
+                img = Image.open(BytesIO(data)).convert("RGB")  # Ensure RGB mode
+                print(f"[DEBUG] Image opened: {img.size[0]}x{img.size[1]}, mode: {img.mode}")
                 # Overlay speech bubbles with actual text
-                img_with_text = self._add_speech_bubbles(img, self.panels[:4])
+                img_with_text = self._overlay_dialogue(img, self.panels[:4])
                 # Convert back to bytes for saving
                 output = BytesIO()
                 img_with_text.save(output, format="PNG")
                 data = output.getvalue()
-                print("[DEBUG] Text overlay applied to speech bubbles")
+                print("[DEBUG] Text overlay applied successfully")
             except Exception as overlay_error:
-                print(f"[DEBUG] Text overlay failed: {overlay_error}, saving original image")
+                print(f"[DEBUG] Text overlay failed: {overlay_error}")
+                import traceback
+                traceback.print_exc()
         else:
             print("[DEBUG] Pillow not available, saving image without text overlay")
 
@@ -191,59 +194,86 @@ class ComicGenerator:
         return png_path
 
     def _build_visual_prompt(self, title: str) -> str:
-        """Build prompt requesting blank speech bubbles for text overlay.
+        """Build action-based prompt with full-body characters and small corner bubbles.
         
-        Note: xAI has a 1024 character limit, so this prompt is optimized for brevity.
+        Note: xAI has a 1024 character limit, so this prompt is optimized for brevity while being explicit.
         """
-        # Shorten character descriptions to essential details
-        short_char_map = {
-            "Max": "tall male, brown hair, red hoodie",
-            "Leo": "male, long black hair, paint-stained shirt",
-            "Emma": "female, glasses, blonde ponytail, blue sweater",
-            "Marvin": "tall gray robot, sad green LED eyes, 'Don't Panic' towel",
-            "Narrator": "narrator figure or scene focus",
+        # Enhanced character descriptions with full-body and actions
+        char_descs = {
+            "Emma": "Emma: anxious young woman with glasses, blonde ponytail, blue sweater, full-body",
+            "Max": "Max: confident tall young man, short brown hair, red hoodie, full-body",
+            "Marvin": "Marvin the Paranoid Android: tall gray robot, oversized head, sad green LED eyes, hunched, holding tiny 'Don't Panic' towel, full-body",
+            "Leo": "Leo: excited young man, long black hair, paint-stained shirt, full-body",
+            "Narrator": "narrator figure",
         }
         
-        panels_desc: list[str] = []
-        for i, p in enumerate(self.panels[:4]):
-            char_short = short_char_map.get(p["speaker"], p["speaker"])
-            mood_short = p['mood'] if p['mood'] != 'default' else "neutral"
-            # Very concise panel description - NO labels that could appear in bubbles
-            panels_desc.append(f"{char_short}, {mood_short} face, empty white oval bubble above head")
+        # Get first 4 panels and extract speakers
+        panels_data = self.panels[:4]
+        speakers = [p.get("speaker", "?") for p in panels_data]
         
-        # Build compact prompt (must be < 1024 chars)
-        # CRITICAL: No text in bubbles - emphasize EMPTY bubbles multiple times
+        # Build panel descriptions with actions and small corner bubbles
+        panel_descs = []
+        for i, (speaker, panel) in enumerate(zip(speakers, panels_data), 1):
+            char_desc = char_descs.get(speaker, speaker)
+            # Get action based on speaker and text
+            action = self._get_action(speaker, panel.get("text", ""))
+            
+            panel_descs.append(
+                f"Panel {i}: {char_desc}, {action}, **small empty white speech bubble in TOP-RIGHT CORNER**, dorm room background"
+            )
+        
+        # Hyper-explicit prompt with full-body and dynamic poses
         prompt = (
-            f"4-panel Pixar comic strip. Title: '{title}'. "
-            f"Consistent characters across panels. Setting: student dorm room. "
-            f"**CRITICAL: ALL speech bubbles are COMPLETELY EMPTY white ovals with ZERO text or letters inside them**. "
-            f"Panel descriptions: {'. '.join(panels_desc)}. "
-            f"High detail, vibrant colors, expressive faces. Bubbles must be blank white ovals."
+            f"**STRICT 2x2 GRID**, 4 panels, Pixar 3D style. "
+            f"**FULL-BODY CHARACTERS, DYNAMIC POSES, NO ZOOM-IN**. "
+            f"**SMALL EMPTY WHITE SPEECH BUBBLE IN TOP-RIGHT CORNER OF EACH PANEL**. "
+            f"**ONE CHARACTER PER PANEL**. "
+            f"Panel 1 (top-left): {panel_descs[0]}. "
+            f"Panel 2 (top-right): {panel_descs[1]}. "
+            f"Panel 3 (bottom-left): {panel_descs[2]}. "
+            f"Panel 4 (bottom-right): {panel_descs[3]}. "
+            f"Consistent dorm: bunk beds, desk, warm light. High detail."
         )
         
-        # Enforce 1024 char limit (leave 20 char margin for safety)
-        max_length = 1004
-        if len(prompt) > max_length:
-            # Truncate even more aggressively - keep EMPTY bubble emphasis
-            base = "4-panel Pixar comic. Consistent characters. Setting: dorm. **ALL bubbles COMPLETELY EMPTY, ZERO text or letters**. "
-            remaining = max_length - len(base) - 20
-            max_per_panel = remaining // 4
-            panels_desc_short = [p[:max_per_panel] for p in panels_desc]
-            prompt = f"{base}{'. '.join(panels_desc_short)}. High detail. Bubbles blank."
-        
-        # Validate final length
+        # Enforce 1024 char limit with ultra-compact fallback
         if len(prompt) > 1024:
-            print(f"[WARNING] Prompt still too long ({len(prompt)} chars), truncating...")
-            prompt = prompt[:1024]
+            # Ultra-compact: just character names and actions
+            char_names = [char_descs.get(s, s).split(":")[0] if ":" in char_descs.get(s, s) else s for s in speakers]
+            actions = [self._get_action(s, panels_data[i].get("text", "")) for i, s in enumerate(speakers)]
+            prompt = (
+                f"STRICT 2x2 grid, 4 panels, Pixar style. Full-body, small corner bubbles. "
+                f"P1 (top-left): {char_names[0]}, {actions[0]}. "
+                f"P2 (top-right): {char_names[1]}, {actions[1]}. "
+                f"P3 (bottom-left): {char_names[2]}, {actions[2]}. "
+                f"P4 (bottom-right): {char_names[3]}, {actions[3]}. "
+                f"Dorm room."
+            )
+            if len(prompt) > 1024:
+                prompt = prompt[:1024]
         
         print(f"[DEBUG] Prompt length: {len(prompt)} chars (max: 1024)")
         return prompt
+    
+    def _get_action(self, speaker: str, text: str) -> str:
+        """Get action verb based on speaker and text content."""
+        text_lower = text.lower()
+        
+        if speaker == "Emma" and ("crash" in text_lower or "fail" in text_lower):
+            return "hands on head in panic"
+        if speaker == "Max" and ("fix" in text_lower or "together" in text_lower):
+            return "pointing forward confidently"
+        if speaker == "Marvin":
+            return "sitting slouched, looking down"
+        if speaker == "Leo" and ("inspired" in text_lower or "draw" in text_lower):
+            return "holding up sketchbook excitedly"
+        
+        return "standing naturally"
 
-    def _add_speech_bubbles(self, img, panels: list[dict]):
-        """Overlay readable text in speech bubbles using PIL.
+    def _overlay_dialogue(self, img, panels: list[dict]):
+        """Overlay readable text in speech bubbles using hardcoded bubble zones.
         
         Args:
-            img: PIL Image object
+            img: PIL Image object (RGB mode)
             panels: List of panel dicts with 'speaker', 'text', 'mood' keys
             
         Returns:
@@ -255,12 +285,15 @@ class ComicGenerator:
         draw = ImageDraw.Draw(img)
         width, height = img.size
         
-        # Try to load a nice font, fallback to default
+        print(f"[DEBUG] Overlaying dialogue on {len(panels)} panels in {width}x{height} image")
+        
+        # Try to load font (smaller for corner bubbles)
         try:
-            # Try system fonts (macOS/Linux/Windows)
+            # macOS
             font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 28)
         except:
             try:
+                # Linux
                 font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 28)
             except:
                 try:
@@ -272,75 +305,137 @@ class ComicGenerator:
         panel_w = width // 2
         panel_h = height // 2
         
-        # Bubble positions for each panel (relative to panel center)
-        # Adjust these based on where bubbles appear in generated image
-        bubble_positions = [
-            (panel_w * 0.15, panel_h * 0.15),   # Top-left panel
-            (panel_w * 1.15, panel_h * 0.15),  # Top-right panel
-            (panel_w * 0.15, panel_h * 1.15),  # Bottom-left panel
-            (panel_w * 1.15, panel_h * 1.15),  # Bottom-right panel
+        # Small corner bubble zones: (x, y, width, height) for each panel
+        # Positioned in TOP-RIGHT corner to avoid covering faces
+        bubble_zones = [
+            (int(panel_w * 0.55), int(panel_h * 0.05), int(panel_w * 0.4), int(panel_h * 0.25)),   # P1: top-left panel, top-right bubble
+            (int(panel_w * 1.55), int(panel_h * 0.05), int(panel_w * 0.4), int(panel_h * 0.25)),   # P2: top-right panel, top-right bubble
+            (int(panel_w * 0.55), int(panel_h * 1.05), int(panel_w * 0.4), int(panel_h * 0.25)),   # P3: bottom-left panel, top-right bubble
+            (int(panel_w * 1.55), int(panel_h * 1.05), int(panel_w * 0.4), int(panel_h * 0.25)),   # P4: bottom-right panel, top-right bubble
         ]
         
         for i, panel in enumerate(panels):
-            if i >= len(bubble_positions):
+            if i >= len(bubble_zones):
                 break
-                
-            x, y = bubble_positions[i]
+            
+            x, y, bw, bh = bubble_zones[i]
             text = panel.get("text", "").strip()
             speaker = panel.get("speaker", "?")
             
             if not text:
                 continue
             
-            # Wrap text to fit bubble (max 25 chars per line for readability)
-            wrapped_lines = textwrap.wrap(text, width=25)
-            num_lines = len(wrapped_lines)
+            print(f"[DEBUG] Panel {i+1} ({speaker}): '{text}'")
             
-            # Calculate bubble size
-            line_height = 35
-            padding = 20
-            bubble_height = (num_lines * line_height) + (padding * 2)
-            bubble_width = 320
+            # Wrap text (max 16 chars per line for smaller corner bubbles)
+            lines = textwrap.wrap(text, width=16)
+            lines = lines[:3]  # Max 3 lines per small bubble
             
-            # Draw rounded rectangle for bubble
-            bubble_box = [
-                x, y,
-                x + bubble_width,
-                y + bubble_height
-            ]
-            
-            # White bubble with black outline
+            # Draw small rounded rectangle bubble in corner
+            bubble_box = [x, y, x + bw, y + bh]
             draw.rounded_rectangle(
                 bubble_box,
-                radius=25,
+                radius=20,
                 fill="white",
                 outline="black",
                 width=3
             )
             
-            # Draw bubble tail (pointing to character)
+            # Draw bubble tail (pointing from top-right corner down-left toward character)
+            tail_x = x + bw - 30
             tail_points = [
-                (x + 60, y + bubble_height),      # Start
-                (x + 80, y + bubble_height + 25), # Point
-                (x + 100, y + bubble_height)      # End
+                (tail_x, y + bh),
+                (tail_x - 20, y + bh + 25),
+                (tail_x + 10, y + bh)
             ]
             draw.polygon(tail_points, fill="white", outline="black", width=2)
             
-            # Draw text lines
-            text_y = y + padding
-            for line in wrapped_lines:
-                # Center text horizontally in bubble
+            # Draw text lines (top-aligned in small bubble)
+            line_h = 35
+            start_y = y + 15
+            
+            # Add padding for text
+            text_padding = 15
+            
+            for j, line in enumerate(lines):
+                text_y = start_y + (j * line_h)
+                
                 if font:
-                    # Get text bbox for centering
-                    bbox = draw.textbbox((0, 0), line, font=font)
-                    text_w = bbox[2] - bbox[0]
-                    text_x = x + (bubble_width - text_w) // 2
-                    draw.text((text_x, text_y), line, fill="black", font=font)
+                    # Left-aligned text in small corner bubble
+                    draw.text((x + text_padding, text_y), line, fill="black", font=font)
                 else:
-                    draw.text((x + padding, text_y), line, fill="black")
-                text_y += line_height
+                    # Left-aligned fallback with padding
+                    draw.text((x + text_padding, text_y), line, fill="black")
+            
+            print(f"[DEBUG] Panel {i+1} complete: {len(lines)} lines at ({x}, {y})")
         
+        print(f"[DEBUG] All dialogue overlays completed")
         return img
+    
+    # Keep old method name for backwards compatibility
+    def _add_speech_bubbles(self, img, panels: list[dict]):
+        """Alias for _overlay_dialogue for backwards compatibility."""
+        return self._overlay_dialogue(img, panels)
+    
+    def _detect_bubble_positions(self, img, panel_w: int, panel_h: int):
+        """Detect existing bubble positions by finding white regions in image.
+        
+        Returns list of (x, y) positions, or None if detection fails.
+        """
+        if not PIL_AVAILABLE:
+            return None
+        
+        try:
+            import numpy as np
+            np_available = True
+        except ImportError:
+            np_available = False
+        
+        if not np_available:
+            return None
+        
+        width, height = img.size
+        
+        # Convert to numpy array for processing
+        img_array = np.array(img)
+        
+        # Define search regions for each panel (upper portion where bubbles typically are)
+        search_regions = [
+            (0, 0, panel_w, int(panel_h * 0.4)),           # Top-left
+            (panel_w, 0, width, int(panel_h * 0.4)),      # Top-right
+            (0, panel_h, panel_w, height),                # Bottom-left
+            (panel_w, panel_h, width, height),           # Bottom-right
+        ]
+        
+        positions = []
+        for x0, y0, x1, y1 in search_regions:
+            # Ensure valid coordinates
+            x0, y0, x1, y1 = int(x0), int(y0), int(x1), int(y1)
+            if x1 > width:
+                x1 = width
+            if y1 > height:
+                y1 = height
+            if x0 >= x1 or y0 >= y1:
+                continue
+            
+            # Extract region
+            region = img_array[y0:y1, x0:x1]
+            if region.size == 0:
+                continue
+            
+            # Find white pixels (RGB > 240)
+            if len(region.shape) == 3 and region.shape[2] >= 3:
+                white_mask = (region[:, :, 0] > 240) & (region[:, :, 1] > 240) & (region[:, :, 2] > 240)
+                
+                if white_mask.sum() > 1000:  # Significant white area found
+                    # Find center of white region
+                    y_coords, x_coords = np.where(white_mask)
+                    if len(x_coords) > 0:
+                        center_x = int(x0 + x_coords.mean())
+                        center_y = int(y0 + y_coords.mean())
+                        positions.append((center_x, center_y))
+        
+        return positions if len(positions) >= 4 else None
 
     def _generate_html_viewer(self, png_path: Path, html_path: Path, title: str) -> None:
         html = (
@@ -357,10 +452,10 @@ class ComicGenerator:
 
     def _load_character_prompts(self) -> dict[str, str]:
         return {
-            "Max": "tall male with short brown hair, blue eyes, confident smile, red hoodie, Pixar 3D style",
-            "Leo": "creative male with long black hair, paint-stained shirt, artistic pose, Pixar 3D style",
-            "Emma": "female with glasses, blonde ponytail, anxious expression, blue sweater, Pixar 3D style",
-            "Marvin": "Marvin the Paranoid Android: tall gray robot, oversized head, sad green LED eyes, hunched posture, carrying tiny 'Don't Panic' towel, Pixar 3D style",
+            "Emma": "Emma: anxious young woman with glasses, blonde ponytail, blue sweater, full-body, Pixar 3D style",
+            "Max": "Max: confident tall young man, short brown hair, red hoodie, full-body, Pixar 3D style",
+            "Marvin": "Marvin the Paranoid Android: tall gray robot, oversized head, sad green LED eyes, hunched, holding tiny 'Don't Panic' towel, full-body, Pixar 3D style",
+            "Leo": "Leo: excited young man, long black hair, paint-stained shirt, full-body, Pixar 3D style",
         }
 
 

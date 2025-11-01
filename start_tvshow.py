@@ -44,12 +44,12 @@ async def _run_demo(voice_enabled: bool, comics_enabled: bool, visual_enabled: b
     voice = VoiceNarrator() if voice_enabled else None
     comic = ComicGenerator(use_visual=visual_enabled) if comics_enabled else None
 
+    # Exactly 4 panels: Emma, Max, Marvin, Leo
     lines = [
-        ("Narrator", "Emma's code just crashed. Deadline in 2 hours.", "panic"),
-        ("Emma", "I... I failed everyone.", "sad"),
+        ("Emma", "Emma's code just crashed. Deadline in 2 hours!", "panic"),
         ("Max", "We fix this TOGETHER. Leo, sketch ideas?", "confident"),
-        ("Leo", "Inspired! Let me draw!", "excited"),
         ("Marvin", "Heh, classic overthink.", "smirk"),
+        ("Leo", "Inspired! Let me draw!", "excited"),
     ]
 
     mood_to_emoji = {
