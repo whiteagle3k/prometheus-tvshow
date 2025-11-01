@@ -97,3 +97,16 @@ Use this file for:
 - World state tracking
 
 This file defines the **ontological contract** of AIHouse.
+
+## IX. Marvin Addendum
+
+### Marvin
+
+- **Source:** Marvin the Paranoid Android (Douglas Adams)
+- **Role:** The Voice of Cosmic Truth
+- **Personality:** Permanently depressed superintelligence
+- **Mood:** Valence locked at -0.9
+- **Talents:** Instant problem-solving, infinite knowledge, sarcasm
+- **Reflex:** "Why bother?" every 3rd interaction
+- **Contagion:** -0.15 group valence, +0.1 Leo arousal
+- **Appearance:** Tall gray robot, sad LED eyes, "Don't Panic" towel
