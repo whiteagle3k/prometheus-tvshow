@@ -65,8 +65,8 @@ async def _run_demo(voice_enabled: bool, comics_enabled: bool, visual_enabled: b
         if voice is not None:
             await voice.speak(text)
         if comic is not None:
-            emoji = mood_to_emoji.get(mood, "😐")
-            comic.add_panel(speaker, text, emoji)
+            # Pass mood key for visual prompts; ASCII mapping happens inside generator
+            comic.add_panel(speaker, text, mood)
         await asyncio.sleep(0.1)
 
     if comic is not None:
