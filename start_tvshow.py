@@ -89,9 +89,9 @@ def main():
     print("🎬 Starting TV Show Extension...")
     print("=" * 50)
     print("📺 TV Show Director Console")
-    print("🌐 Backend API: http://localhost:8000")
-    print("🎭 UI Console: http://localhost:8000/tvshow")
-    print("📋 API Docs: http://localhost:8000/docs")
+    print("🌐 Backend API: http://localhost:8011")
+    print("🎭 UI Console: http://localhost:8011/tvshow")
+    print("📋 API Docs: http://localhost:8011/docs")
     print("=" * 50)
 
     # Initialize the system
@@ -106,7 +106,7 @@ def main():
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=8000,
+        port=8011,
         reload=False,
         log_level="info",
     )

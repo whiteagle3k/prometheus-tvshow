@@ -7,14 +7,14 @@ export default defineConfig({
     port: 3001,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:8011',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, '')
       },
-      '/tvshow/ws': {
-        target: 'ws://localhost:8000',
-        ws: true,
+      '/tvshow': {
+        target: 'http://localhost:8011',
         changeOrigin: true,
+        ws: true,  // Enable WebSocket proxying for /tvshow/ws
       }
     }
   }
