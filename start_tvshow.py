@@ -36,20 +36,20 @@ async def init_system():
     
     return success
 
-async def _run_demo(voice_enabled: bool, comics_enabled: bool) -> None:
+async def _run_demo(voice_enabled: bool, comics_enabled: bool, visual_enabled: bool = False) -> None:
     """Run a short, scripted demo episode.
 
     This does not require the full backend to be running and is safe for CI.
     """
     voice = VoiceNarrator() if voice_enabled else None
-    comic = ComicGenerator() if comics_enabled else None
+    comic = ComicGenerator(use_visual=visual_enabled) if comics_enabled else None
 
+    # Exactly 4 panels: Emma, Max, Marvin, Leo
     lines = [
-        ("Narrator", "Emma's code just crashed. Deadline in 2 hours.", "panic"),
-        ("Emma", "I... I failed everyone.", "sad"),
+        ("Emma", "Emma's code just crashed. Deadline in 2 hours!", "panic"),
         ("Max", "We fix this TOGETHER. Leo, sketch ideas?", "confident"),
-        ("Leo", "Inspired! Let me draw!", "excited"),
         ("Marvin", "Heh, classic overthink.", "smirk"),
+        ("Leo", "Inspired! Let me draw!", "excited"),
     ]
 
     mood_to_emoji = {
@@ -65,12 +65,12 @@ async def _run_demo(voice_enabled: bool, comics_enabled: bool) -> None:
         if voice is not None:
             await voice.speak(text)
         if comic is not None:
-            emoji = mood_to_emoji.get(mood, "😐")
-            comic.add_panel(speaker, text, emoji)
+            # Pass mood key for visual prompts; ASCII mapping happens inside generator
+            comic.add_panel(speaker, text, mood)
         await asyncio.sleep(0.1)
 
     if comic is not None:
-        comic.export("Demo: Project Crisis")
+        await comic.export("Demo: Project Crisis")
 
 
 def main():
@@ -79,11 +79,12 @@ def main():
     parser.add_argument("--demo", action="store_true", help="Run auto demo and exit")
     parser.add_argument("--voice", action="store_true", help="Enable voice narration in demo mode")
     parser.add_argument("--comics", action="store_true", help="Export ASCII comics in demo mode")
+    parser.add_argument("--visual", action="store_true", help="Generate visual comic via xAI API in demo mode")
     args = parser.parse_args()
 
     if args.demo:
         print("🎬 Running TV Show Demo Mode...")
-        asyncio.run(_run_demo(voice_enabled=args.voice, comics_enabled=args.comics))
+        asyncio.run(_run_demo(voice_enabled=args.voice, comics_enabled=args.comics, visual_enabled=args.visual))
         return
 
     print("🎬 Starting TV Show Extension...")
